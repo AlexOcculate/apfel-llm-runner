@@ -97,33 +97,27 @@ if [[ ! "$sri" =~ ^sha256- ]]; then
   exit 1
 fi
 
-# Build the new file content: rewrite only `version = "..."` and `hash = "sha256-..."`.
-# sed -i differs between GNU and BSD; use python3 for portability and precision.
-new_content=$(python3 - "$file" "$version" "$sri" <<'PY'
+# Rewrite only `version = "..."` and `hash = "sha256-..."` in place.
+# Python writes directly to the file so the original trailing newline is preserved
+# byte-for-byte (treefmt rejects nixpkgs files without a final newline).
+# `$dry_run` is consumed inside python so the script stays single-pass.
+python3 - "$file" "$version" "$sri" "$dry_run" <<'PY'
 import pathlib, re, sys
-path, new_version, new_hash = sys.argv[1], sys.argv[2], sys.argv[3]
-text = pathlib.Path(path).read_text()
-text = re.sub(r'version = "[^"]*";', f'version = "{new_version}";', text, count=1)
-text = re.sub(r'hash = "sha256-[^"]*";', f'hash = "{new_hash}";', text, count=1)
-sys.stdout.write(text)
+path, new_version, new_hash, dry_run = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+src = pathlib.Path(path).read_text()
+dst = re.sub(r'version = "[^"]*";', f'version = "{new_version}";', src, count=1)
+dst = re.sub(r'hash = "sha256-[^"]*";', f'hash = "{new_hash}";', dst, count=1)
+if dst == src:
+    print("no change: version and hash already current", file=sys.stderr)
+    sys.exit(0)
+if dry_run == "true":
+    import difflib
+    sys.stderr.writelines(difflib.unified_diff(
+        src.splitlines(keepends=True), dst.splitlines(keepends=True),
+        fromfile=f"{path} (current)", tofile=f"{path} (would be)"))
+    print("\n(dry-run: file not modified)", file=sys.stderr)
+    sys.exit(0)
+pathlib.Path(path).write_text(dst)
 PY
-)
 
-old_content=$(cat "$file")
-
-if [[ "$new_content" == "$old_content" ]]; then
-  echo "no change: version=$version and hash already current" >&2
-  exit 0
-fi
-
-if $dry_run; then
-  echo "--- $file (current)"
-  echo "+++ $file (would be)"
-  diff <(echo "$old_content") <(echo "$new_content") || true
-  echo
-  echo "(dry-run: file not modified)" >&2
-  exit 0
-fi
-
-printf '%s' "$new_content" > "$file"
 echo "updated $file -> version=$version hash=$sri" >&2
