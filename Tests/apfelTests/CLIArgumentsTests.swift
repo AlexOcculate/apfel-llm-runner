@@ -705,6 +705,26 @@ func runCLIArgumentsTests() {
         try assertEqual(args.contextOutputReserve, 1024)
     }
 
+    test("APFEL_DEBUG env enables debug (#164)") {
+        let args = try CLIArguments.parse(["hi"], env: ["APFEL_DEBUG": "1"])
+        try assertTrue(args.debug)
+    }
+
+    test("APFEL_DEBUG env with any non-empty value enables debug (#164)") {
+        let args = try CLIArguments.parse(["hi"], env: ["APFEL_DEBUG": "true"])
+        try assertTrue(args.debug)
+    }
+
+    test("APFEL_DEBUG env empty string does not enable debug (#164)") {
+        let args = try CLIArguments.parse(["hi"], env: ["APFEL_DEBUG": ""])
+        try assertTrue(!args.debug)
+    }
+
+    test("--debug CLI flag still works without APFEL_DEBUG env (#164)") {
+        let args = try CLIArguments.parse(["--debug", "hi"])
+        try assertTrue(args.debug)
+    }
+
     test("APFEL_MCP env splits on colon separator") {
         let args = try CLIArguments.parse(["hi"], env: ["APFEL_MCP": "a.py:b.py"])
         try assertEqual(args.mcpServerPaths, ["a.py", "b.py"])

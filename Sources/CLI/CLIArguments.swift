@@ -196,6 +196,10 @@ extension CLIArguments {
         result.contextMaxTurns = env["APFEL_CONTEXT_MAX_TURNS"].flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
         result.contextOutputReserve = env["APFEL_CONTEXT_OUTPUT_RESERVE"]
             .flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
+        // APFEL_DEBUG=<any non-empty value> enables debug logging, same as --debug (#164).
+        if let debugVal = env["APFEL_DEBUG"], !debugVal.isEmpty {
+            result.debug = true
+        }
 
         // Parser-phase state. Mode-setting flags are recorded in
         // `context.modeFlagsSeen` so the post-parse validate() step can detect

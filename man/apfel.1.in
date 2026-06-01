@@ -289,6 +289,10 @@ strategy.
 Tokens reserved for the model's output. Default
 .BR 512 .
 .TP
+.B APFEL_DEBUG
+When set to any non-empty value, enables debug logging (same as
+.BR \-\-debug ).
+.TP
 .B NO_COLOR
 When set to any non-empty value, disables ANSI color output. See
 .UR https://no-color.org

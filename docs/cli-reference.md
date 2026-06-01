@@ -186,4 +186,5 @@ Security details live in [server-security.md](server-security.md). Background-se
 | `APFEL_MCP` | MCP server paths - colon-separated for local paths, comma-separated for mixed local+remote URLs |
 | `APFEL_MCP_TOKEN` | Bearer token for remote HTTP MCP servers (preferred over `--mcp-token`; not visible in `ps aux`) |
 | `APFEL_MCP_TIMEOUT` | MCP timeout in seconds (default: 5, max: 300) |
+| `APFEL_DEBUG` | Enable debug logging (same as `--debug`) |
 | `NO_COLOR` | Disable colors ([https://no-color.org](https://no-color.org)) |
