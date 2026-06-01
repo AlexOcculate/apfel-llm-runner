@@ -75,6 +75,30 @@ func runCLIArgumentsTests() {
         try assertEqual(args.mode, .update)
     }
 
+    test("tag subcommand sets tag mode") {
+        let args = try CLIArguments.parse(["tag"])
+        try assertEqual(args.mode, .tag)
+    }
+
+    test("tag subcommand accepts -o json after it") {
+        let args = try CLIArguments.parse(["tag", "-o", "json"])
+        try assertEqual(args.mode, .tag)
+        try assertEqual(args.outputFormat, .json)
+    }
+
+    test("tag is only a subcommand as the first arg, not inside a prompt") {
+        let args = try CLIArguments.parse(["please", "tag", "this"])
+        try assertEqual(args.mode, .single)
+        try assertEqual(args.prompt, "please tag this")
+    }
+
+    test("tag mode does not use the shared stdin-prompt path") {
+        // .tag reads stdin itself (classified, not appended to a prompt), so it
+        // is intentionally excluded from acceptsStdinInput.
+        let args = try CLIArguments.parse(["tag"])
+        try assertTrue(!args.mode.acceptsStdinInput)
+    }
+
     // ========================================================================
     // MARK: - acceptsStdinInput (GH-82)
     // ========================================================================
@@ -480,6 +504,43 @@ func runCLIArgumentsTests() {
         }
     }
 
+    test("--top-p parses") {
+        let args = try CLIArguments.parse(["--top-p", "0.9", "hi"])
+        try assertEqual(args.topP, 0.9)
+    }
+
+    test("--top-p of 1 is valid") {
+        let args = try CLIArguments.parse(["--top-p", "1", "hi"])
+        try assertEqual(args.topP, 1.0)
+    }
+
+    test("--top-p zero throws") {
+        do {
+            _ = try CLIArguments.parse(["--top-p", "0"])
+            try assertTrue(false, "should have thrown")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--top-p"))
+        }
+    }
+
+    test("--top-p above 1 throws") {
+        do {
+            _ = try CLIArguments.parse(["--top-p", "1.5"])
+            try assertTrue(false, "should have thrown")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--top-p"))
+        }
+    }
+
+    test("--top-p non-numeric throws") {
+        do {
+            _ = try CLIArguments.parse(["--top-p", "wide"])
+            try assertTrue(false, "should have thrown")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--top-p"))
+        }
+    }
+
     test("--seed parses") {
         let args = try CLIArguments.parse(["--seed", "42", "hi"])
         try assertEqual(args.seed, 42)
@@ -527,11 +588,15 @@ func runCLIArgumentsTests() {
         try assertTrue(args.quiet)
     }
 
-    test("--retry 0 rejected (falls back to default 3)") {
-        let args = try CLIArguments.parse(["--retry", "0", "hi"])
-        try assertTrue(args.retryEnabled)
-        try assertEqual(args.retryCount, 3)
-        try assertEqual(args.prompt, "0 hi")
+    test("--retry 0 throws (non-positive count rejected, like other numeric flags) (#177)") {
+        // Pre-#177 this silently fell back to 3 and folded "0" into the prompt.
+        // #177 makes a non-positive --retry value a hard error, matching --port etc.
+        do {
+            _ = try CLIArguments.parse(["--retry", "0", "hi"])
+            throw TestFailure("expected CLIParseError for --retry 0")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--retry"))
+        }
     }
 
     // ========================================================================

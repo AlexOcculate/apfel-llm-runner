@@ -99,12 +99,15 @@ suite("TraceBufferTests") { runTraceBufferTests() }
 suite("StreamTaskBoxTests") { runStreamTaskBoxTests() }
 suite("ManPageTests") { runManPageTests() }
 suite("StreamCleanupTests") { runStreamCleanupTests() }
+suite("StreamPrintSinkTests") { runStreamPrintSinkTests() }
 suite("BufferedLineReaderConcurrencyTests") { runBufferedLineReaderConcurrencyTests() }
 suite("DebugFlagBaselineTests") { runDebugFlagBaselineTests() }
 suite("ApfelErrorMessageTests") { runApfelErrorMessageTests() }
 suite("OpenAIWireFormatTests") { runOpenAIWireFormatTests() }
 suite("ApfelCorePublicAPIUsageTests") { runApfelCorePublicAPIUsageTests() }
 suite("InstallMethodTests") { runInstallMethodTests() }
+suite("SamplingDecisionTests") { runSamplingDecisionTests() }
+suite("RedTDDTests") { runRedTDDTests() }
 
 // MARK: - Summary
 

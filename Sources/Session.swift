@@ -13,6 +13,7 @@ import ApfelCore
 /// Options forwarded from CLI flags or OpenAI request parameters.
 struct SessionOptions: Sendable {
     let temperature: Double?
+    let topP: Double?
     let maxTokens: Int?
     let seed: UInt64?
     let permissive: Bool
@@ -21,19 +22,35 @@ struct SessionOptions: Sendable {
     let retryCount: Int
 
     static let defaults = SessionOptions(
-        temperature: nil, maxTokens: nil, seed: nil, permissive: false,
+        temperature: nil, topP: nil, maxTokens: nil, seed: nil, permissive: false,
         contextConfig: .defaults, retryEnabled: false, retryCount: 3
     )
 }
 
 // MARK: - Generation Options
 
-func makeGenerationOptions(_ opts: SessionOptions) -> GenerationOptions {
-    let sampling: GenerationOptions.SamplingMode? = opts.seed.map {
-        .random(top: 50, seed: $0)
+/// Translate the pure `SamplingDecision` into the SDK's sampling mode.
+func makeSamplingMode(_ decision: SamplingDecision) -> GenerationOptions.SamplingMode? {
+    switch decision {
+    case .greedy:
+        return .greedy
+    case let .nucleus(probabilityThreshold, seed):
+        return .random(probabilityThreshold: probabilityThreshold, seed: seed)
+    case let .topK(top, seed):
+        return .random(top: top, seed: seed)
+    case .defaultMode:
+        return nil
     }
+}
+
+func makeGenerationOptions(_ opts: SessionOptions) -> GenerationOptions {
+    let decision = SamplingDecision.resolve(
+        temperature: opts.temperature,
+        topP: opts.topP,
+        seed: opts.seed
+    )
     return GenerationOptions(
-        sampling: sampling,
+        sampling: makeSamplingMode(decision),
         temperature: opts.temperature,
         maximumResponseTokens: opts.maxTokens
     )
@@ -81,12 +98,17 @@ func transcriptEntries(_ transcript: Transcript) -> [Transcript.Entry] {
     Array(transcript)
 }
 
+/// Assemble the full prompt-token accounting input from the entries
+/// ContextManager actually built (which retain native tool definitions) plus
+/// the final prompt sent via respond(). Reading the entries back from
+/// `session.transcript` instead drops `Instructions.toolDefinitions`, which
+/// undercounts prompt tokens for tool-augmented requests (#176).
 func sessionInputEntries(
-    _ session: LanguageModelSession,
+    builtEntries: [Transcript.Entry],
     finalPrompt: String,
     options: SessionOptions = .defaults
 ) -> [Transcript.Entry] {
-    var entries = transcriptEntries(session.transcript)
+    var entries = builtEntries
     entries.append(makePromptEntry(finalPrompt, options: options))
     return entries
 }
@@ -239,21 +261,18 @@ func processPrompt(
 
     var content: String
     var finishReason: FinishReason = .stop
-    if stream {
-        let outcome = try await withRetry(maxRetries: retryMax) {
-            try await collectStream(session, prompt: prompt, printDelta: printDelta && !hasMCPTools, options: genOpts)
-        }
-        content = outcome.content
-        finishReason = outcome.finishReason
-    } else {
-        // Route non-streaming through the streaming path too: same overflow
-        // semantics on both paths, no second code path to maintain.
-        let outcome = try await withRetry(maxRetries: retryMax) {
-            try await collectStream(session, prompt: prompt, printDelta: false, options: genOpts)
-        }
-        content = outcome.content
-        finishReason = outcome.finishReason
+    // Print deltas only on the live streaming path with no MCP tools (tool calls
+    // re-prompt and stream the final answer separately). Share ONE print sink
+    // across all retry attempts: a retryable mid-stream error re-runs the stream
+    // from an empty snapshot, and the sink suppresses re-emitting the already-
+    // printed prefix so output appears exactly once, live, in order (#182).
+    let shouldPrint = stream && printDelta && !hasMCPTools
+    let printSink = shouldPrint ? StreamPrintSink() : nil
+    let outcome = try await withRetry(maxRetries: retryMax) {
+        try await collectStream(session, prompt: prompt, sink: printSink, options: genOpts)
     }
+    content = outcome.content
+    finishReason = outcome.finishReason
 
     debugLog("response", "length=\(content.count) finish=\(finishReason)")
 
@@ -339,13 +358,77 @@ func executeMCPToolCallsForCLI(
         return nil
     }
 
+    var aggregatedLog = executed.toolLog
     let plainSession = makeSession(systemPrompt: systemPrompt)
-    let toolResult = executed.resultParts.joined(separator: "\n")
-    let finalContent = try await plainSession.respond(
+    var toolResult = executed.resultParts.joined(separator: "\n")
+    var finalContent = try await plainSession.respond(
         to: "The user asked: \(userPrompt)\n\nThe tool returned: \(toolResult)\n\nAnswer the user's question using this result.",
         options: options
     ).content
-    return (content: finalContent, toolLog: executed.toolLog)
+
+    // The re-prompt answer may itself contain another tool_calls request. If we
+    // returned it verbatim that JSON would leak to the user as raw text. Run a
+    // bounded re-detection loop: execute any further tool calls and re-prompt
+    // again, with a hard cap so a model that keeps emitting tool_calls cannot
+    // spin forever. On cap exhaustion we strip the trailing tool-call JSON so no
+    // raw protocol text leaks.
+    let maxReprompts = 3
+    var reprompts = 0
+    while reprompts < maxReprompts,
+          let followUp = try await detectAndExecuteMCPTools(in: finalContent, mcpManager: mcpManager) {
+        reprompts += 1
+        aggregatedLog.append(contentsOf: followUp.toolLog)
+        toolResult = followUp.resultParts.joined(separator: "\n")
+        finalContent = try await plainSession.respond(
+            to: "The user asked: \(userPrompt)\n\nThe tool returned: \(toolResult)\n\nAnswer the user's question using this result.",
+            options: options
+        ).content
+    }
+
+    // Cap exhausted but the model is still emitting a tool call: strip the raw
+    // JSON so it never reaches the user as text.
+    if ToolCallHandler.detectToolCall(in: finalContent) != nil {
+        finalContent = stripToolCallJSON(from: finalContent)
+    }
+
+    return (content: finalContent, toolLog: aggregatedLog)
+}
+
+/// Remove a trailing `{"tool_calls": ...}` JSON block from model output so it
+/// never leaks to the user as raw protocol text. Mirrors the string-aware
+/// balanced-brace scan in `ToolCallHandler.extractCandidates`. If no balanced
+/// block is found, the original text (trimmed) is returned unchanged.
+func stripToolCallJSON(from text: String) -> String {
+    guard let range = text.range(of: "{\"tool_calls\"") else {
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    var depth = 0
+    var inString = false
+    var escaped = false
+    var idx = range.lowerBound
+    while idx < text.endIndex {
+        let ch = text[idx]
+        if inString {
+            if escaped { escaped = false }
+            else if ch == "\\" { escaped = true }
+            else if ch == "\"" { inString = false }
+        } else if ch == "\"" {
+            inString = true
+        } else if ch == "{" {
+            depth += 1
+        } else if ch == "}" {
+            depth -= 1
+            if depth == 0 {
+                let before = String(text[text.startIndex..<range.lowerBound])
+                let after = String(text[text.index(after: idx)...])
+                return (before + after).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        idx = text.index(after: idx)
+    }
+    // No balanced close — drop everything from the marker onward.
+    return String(text[text.startIndex..<range.lowerBound])
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 /// Server path: execute MCP tool calls and re-prompt with full conversation context.
@@ -367,7 +450,7 @@ func executeMCPToolCallsForServer(
         toolCalls: executed.toolCalls,
         toolResults: executed.toolLog.map { ($0.name, $0.result) }
     )
-    let (followUpSession, followUpPrompt) = try await ContextManager.makeSession(
+    let (followUpSession, followUpPrompt, _) = try await ContextManager.makeSession(
         messages: followUpMessages,
         tools: nil,
         options: sessionOptions,
@@ -423,7 +506,7 @@ private func appendExecutedToolResults(
 func collectStream(
     _ session: LanguageModelSession,
     prompt: String,
-    printDelta: Bool,
+    sink: StreamPrintSink? = nil,
     options: GenerationOptions = GenerationOptions()
 ) async throws -> StreamOutcome {
     let stream = session.streamResponse(to: prompt, options: options)
@@ -431,13 +514,12 @@ func collectStream(
     do {
         for try await snapshot in stream {
             let content = snapshot.content
-            if content.count > prev.count {
-                let idx = content.index(content.startIndex, offsetBy: prev.count)
-                let delta = String(content[idx...])
-                if printDelta {
-                    print(delta, terminator: "")
-                    fflush(stdout)
-                }
+            // Feed the cumulative snapshot to the (optional) print sink. The sink
+            // tracks a high-water mark across retries and emits only the suffix
+            // beyond what it has already printed, so a retried re-run never
+            // reprints the already-streamed prefix (#182).
+            if let sink {
+                await sink.feed(cumulative: content)
             }
             prev = content
         }

@@ -31,7 +31,7 @@ enum ContextManager {
         options: SessionOptions,
         jsonMode: Bool = false,
         toolChoice: ToolChoice? = nil
-    ) async throws -> (session: LanguageModelSession, finalPrompt: String) {
+    ) async throws -> (session: LanguageModelSession, finalPrompt: String, inputEntries: [Transcript.Entry]) {
         let conversation = messages.filter { $0.role != "system" }
         let effectiveTools: [OpenAITool]?
         if case .some(.none) = toolChoice {
@@ -101,7 +101,11 @@ enum ContextManager {
         }
 
         let session = makeTranscriptSession(model: model, entries: entries)
-        return (session, finalPrompt)
+        // Return the entries we actually built (with native tool definitions
+        // intact) so callers can count prompt tokens accurately. Reading them
+        // back from `session.transcript` drops `Instructions.toolDefinitions`,
+        // which would undercount prompt tokens for tool-augmented requests (#176).
+        return (session, finalPrompt, entries)
     }
 
     // MARK: - Instructions Builder

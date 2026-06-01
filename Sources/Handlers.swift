@@ -52,6 +52,7 @@ func handleChatCompletion(_ request: Request, context: some RequestContext) asyn
     let isStreaming = chatRequest.stream == true
     let includeUsage = chatRequest.stream_options?.include_usage == true
     let jsonMode = chatRequest.response_format?.type == "json_object"
+    let wantsJSONSchema = chatRequest.response_format?.type == "json_schema"
 
     if let failure = ChatRequestValidator.validate(chatRequest) {
         return chatFailure(
@@ -67,6 +68,38 @@ func handleChatCompletion(_ request: Request, context: some RequestContext) asyn
 
     events.append("decoded messages=\(chatRequest.messages.count) stream=\(isStreaming) model=\(chatRequest.model)")
 
+    // response_format: json_schema -> guaranteed structured outputs (#167).
+    // Build the native GenerationSchema up front so a malformed/unsupported
+    // caller schema fails fast as a 400 before we touch the model.
+    var structuredSchema: GenerationSchema?
+    if wantsJSONSchema {
+        guard let spec = chatRequest.response_format?.json_schema,
+              let schemaJSON = spec.schema?.value else {
+            return chatFailure(
+                status: .badRequest,
+                message: "response_format.json_schema requires a 'schema' object",
+                type: "invalid_request_error",
+                stream: isStreaming,
+                requestBody: requestBodyString,
+                events: events,
+                event: "json_schema: missing schema"
+            )
+        }
+        do {
+            structuredSchema = try SchemaConverter.generationSchema(fromJSON: schemaJSON, name: spec.name)
+        } catch {
+            return chatFailure(
+                status: .badRequest,
+                message: "Invalid response_format.json_schema: \(error)",
+                type: "invalid_request_error",
+                stream: isStreaming,
+                requestBody: requestBodyString,
+                events: events,
+                event: "json_schema: schema conversion failed: \(error)"
+            )
+        }
+    }
+
     // Build context config from request extensions (optional, defaults to newest-first)
     let contextConfig = ContextConfig(
         strategy: chatRequest.x_context_strategy.flatMap { ContextStrategy(rawValue: $0) } ?? .newestFirst,
@@ -77,6 +110,7 @@ func handleChatCompletion(_ request: Request, context: some RequestContext) asyn
     // Build session options from request (retry config comes from server config)
     let sessionOpts = SessionOptions(
         temperature: chatRequest.temperature,
+        topP: chatRequest.top_p,
         maxTokens: chatRequest.max_tokens,
         seed: chatRequest.seed.map { UInt64($0) },
         permissive: serverState.config.permissive,
@@ -94,8 +128,9 @@ func handleChatCompletion(_ request: Request, context: some RequestContext) asyn
     // Build session + extract final prompt via ContextManager (Transcript API)
     let session: LanguageModelSession
     let finalPrompt: String
+    let inputEntries: [Transcript.Entry]
     do {
-        (session, finalPrompt) = try await ContextManager.makeSession(
+        (session, finalPrompt, inputEntries) = try await ContextManager.makeSession(
             messages: chatRequest.messages,
             tools: effectiveTools,
             options: sessionOpts,
@@ -118,8 +153,10 @@ func handleChatCompletion(_ request: Request, context: some RequestContext) asyn
     events.append("context built history=\(max(0, chatRequest.messages.count - 1)) final_prompt_chars=\(finalPrompt.count)")
 
     let genOpts = makeGenerationOptions(sessionOpts)
+    // Count the entries we actually built (native tool definitions intact),
+    // not the session's transcript, which drops Instructions.toolDefinitions (#176).
     let promptTokens = await TokenCounter.shared.count(
-        entries: sessionInputEntries(session, finalPrompt: finalPrompt, options: sessionOpts)
+        entries: sessionInputEntries(builtEntries: inputEntries, finalPrompt: finalPrompt, options: sessionOpts)
     )
     let requestId = "chatcmpl-\(UUID().uuidString.prefix(12).lowercased())"
     let created = Int(Date().timeIntervalSince1970)
@@ -136,6 +173,23 @@ func handleChatCompletion(_ request: Request, context: some RequestContext) asyn
             includeUsage: includeUsage, jsonMode: jsonMode,
             requestBody: requestBodyString, events: events
         )
+        return (result.response, result.trace)
+    }
+
+    // json_schema -> schema-guided generation (#167, streaming #171).
+    if let schema = structuredSchema {
+        if isStreaming {
+            let result = structuredStreamingResponse(
+                session: session, prompt: finalPrompt, schema: schema,
+                id: requestId, created: created, genOpts: genOpts,
+                promptTokens: promptTokens, includeUsage: includeUsage,
+                requestBody: requestBodyString, events: events)
+            return (result.response, result.trace)
+        }
+        let result = try await structuredNonStreamingResponse(
+            session: session, prompt: finalPrompt, schema: schema,
+            id: requestId, created: created, genOpts: genOpts,
+            promptTokens: promptTokens, requestBody: requestBodyString, events: events)
         return (result.response, result.trace)
     }
 
@@ -334,7 +388,7 @@ private func nonStreamingResponse(
         // Route non-streaming through collectStream so output-side context
         // overflow surfaces as a graceful length-finish on this path too.
         outcome = try await withRetry(maxRetries: nsRetryMax) {
-            try await collectStream(session, prompt: prompt, printDelta: false, options: genOpts)
+            try await collectStream(session, prompt: prompt, options: genOpts)
         }
     } catch {
         let classified = ApfelError.classify(error)
@@ -578,7 +632,14 @@ private func streamingResponse(
                     responseLines?.append(finishLine.trimmingCharacters(in: .whitespacesAndNewlines))
                     continuation.yield(ByteBuffer(string: finishLine))
 
-                    completionTokens = await TokenCounter.shared.count(explanation)
+                    // Completion tokens must account for BOTH the content already
+                    // streamed before the refusal (accumulated in `prev`) and the
+                    // refusal explanation itself. Counting only `explanation` drops
+                    // the pre-refusal streamed content. The pure helper returns the
+                    // concatenation so we make a single `count()` call (avoiding
+                    // double-counting tokens at the join boundary).
+                    completionTokens = await TokenCounter.shared.count(
+                        StreamErrorResolver.refusalCompletionText(prev: prev, explanation: explanation))
                     if includeUsage {
                         let usageChunk = sseUsageChunk(
                             id: id, created: created,
@@ -645,6 +706,253 @@ private func streamingResponse(
                 ? "Streaming response in progress. See /v1/chat/completions/stream log for final SSE transcript."
                 : nil,
             events: events + ["stream request accepted", "final stream completion logged separately"]
+        )
+    )
+}
+
+// MARK: - Structured Output (response_format: json_schema, #167)
+
+/// Non-streaming schema-guided generation. The model generates against the
+/// native `GenerationSchema`, guaranteeing the output conforms to the caller's
+/// JSON Schema. The `GeneratedContent` is serialized to JSON and returned as
+/// the message content.
+private func structuredNonStreamingResponse(
+    session: LanguageModelSession,
+    prompt: String,
+    schema: GenerationSchema,
+    id: String,
+    created: Int,
+    genOpts: GenerationOptions,
+    promptTokens: Int,
+    requestBody: String?,
+    events: [String]
+) async throws -> (response: Response, trace: ChatRequestTrace) {
+    let nsRetryMax = serverState.config.retryEnabled ? serverState.config.retryCount : 0
+    let content: String
+    do {
+        content = try await withRetry(maxRetries: nsRetryMax) {
+            let result = try await session.respond(to: prompt, schema: schema, options: genOpts)
+            return result.content.jsonString
+        }
+    } catch {
+        let classified = ApfelError.classify(error)
+        if case .refusal(let explanation) = classified {
+            return await refusalNonStreamingResponse(
+                id: id, created: created, promptTokens: promptTokens,
+                refusal: explanation, requestBody: requestBody,
+                events: events + ["refusal: \(classified.cliLabel)"]
+            )
+        }
+        let msg = classified.openAIMessage
+        return chatFailure(
+            status: .init(code: classified.httpStatusCode),
+            message: msg,
+            type: classified.openAIType,
+            stream: false,
+            requestBody: requestBody,
+            events: events,
+            event: "structured model error: \(classified.cliLabel)"
+        )
+    }
+
+    let completionTokens = await TokenCounter.shared.count(content)
+    let finishReason = "stop"
+    let responseMessage = OpenAIMessage(role: "assistant", content: .text(content))
+    let payload = ChatCompletionResponse(
+        id: id,
+        object: "chat.completion",
+        created: created,
+        model: modelName,
+        choices: [.init(index: 0, message: responseMessage, finish_reason: finishReason, logprobs: nil)],
+        usage: .init(prompt_tokens: promptTokens, completion_tokens: completionTokens,
+                     total_tokens: promptTokens + completionTokens)
+    )
+    let body = jsonString(payload)
+    var headers = HTTPFields()
+    headers[.contentType] = "application/json"
+    let response = Response(status: .ok, headers: headers,
+                             body: .init(byteBuffer: ByteBuffer(string: body)))
+    return (
+        response,
+        ChatRequestTrace(
+            stream: false,
+            estimatedTokens: promptTokens + completionTokens,
+            error: nil,
+            requestBody: requestBody,
+            responseBody: captureTruncatedLogBody(body, enabled: serverState.config.debug),
+            events: events + ["structured non-stream chars=\(content.count)", "finish_reason=\(finishReason)"]
+        )
+    )
+}
+
+/// Streaming schema-guided generation (#171). FoundationModels emits cumulative
+/// `GeneratedContent` snapshots; we serialize each to JSON and stream the new
+/// suffix as content deltas, so the concatenated stream is valid, conforming JSON.
+private func structuredStreamingResponse(
+    session: LanguageModelSession,
+    prompt: String,
+    schema: GenerationSchema,
+    id: String,
+    created: Int,
+    genOpts: GenerationOptions,
+    promptTokens: Int,
+    includeUsage: Bool,
+    requestBody: String?,
+    events: [String]
+) -> (response: Response, trace: ChatRequestTrace) {
+    var headers = HTTPFields()
+    headers[.contentType] = "text/event-stream"
+    headers[.cacheControl] = "no-cache"
+    headers[.init("Connection")!] = "keep-alive"
+    let eventBox = TraceBuffer(events: events + ["structured stream start"])
+    let cleanup = StreamCleanup()
+    let taskBox = StreamTaskBox()
+    let captureDebugBodies = serverState.config.debug
+
+    let responseStream = AsyncStream<ByteBuffer> { continuation in
+        let streamTask = Task {
+            let streamStart = Date()
+            var responseLines: [String]? = captureDebugBodies ? [] : nil
+            responseLines?.reserveCapacity(16)
+            var streamError: String?
+            var streamCancelled = false
+            var completionTokens = 0
+
+            defer {
+                Task {
+                    await cleanup.run {
+                        await serverState.semaphore.signal()
+                        await serverState.logStore.requestFinished()
+                    }
+                    continuation.finish()
+                }
+            }
+
+            let roleLine = sseDataLine(sseRoleChunk(id: id, created: created))
+            responseLines?.append(roleLine.trimmingCharacters(in: .whitespacesAndNewlines))
+            continuation.yield(ByteBuffer(string: roleLine))
+            await eventBox.append("sent role chunk")
+
+            let stream = session.streamResponse(to: prompt, schema: schema, options: genOpts)
+            var prev = ""
+
+            do {
+                // Partial GeneratedContent snapshots do not serialize to a
+                // growing prefix of the final JSON (a partial object's jsonString
+                // is its own well-formed fragment, not a substring of the final).
+                // Streaming suffix-diffs would therefore concatenate into invalid
+                // JSON. To keep the concatenated stream a single valid, conforming
+                // document, we buffer to the final snapshot and emit it as one
+                // content delta (#167/#171).
+                for try await snapshot in stream {
+                    prev = snapshot.content.jsonString
+                }
+
+                let contentLine = sseDataLine(sseContentChunk(id: id, created: created, content: prev))
+                responseLines?.append(contentLine.trimmingCharacters(in: .whitespacesAndNewlines))
+                continuation.yield(ByteBuffer(string: contentLine))
+                await eventBox.append("structured content delta chars=\(prev.count)")
+
+                completionTokens = await TokenCounter.shared.count(prev)
+                let finishReason = FinishReason.stop.openAIValue
+                let stopChunk = ChatCompletionChunk(
+                    id: id, object: "chat.completion.chunk", created: created, model: modelName,
+                    choices: [.init(index: 0, delta: .init(role: nil, content: nil, tool_calls: nil), finish_reason: finishReason, logprobs: nil)],
+                    usage: nil
+                )
+                let stopLine = sseDataLine(stopChunk)
+                responseLines?.append(stopLine.trimmingCharacters(in: .whitespacesAndNewlines))
+                continuation.yield(ByteBuffer(string: stopLine))
+
+                if includeUsage {
+                    let usageChunk = sseUsageChunk(id: id, created: created, promptTokens: promptTokens, completionTokens: completionTokens)
+                    let usageLine = sseDataLine(usageChunk)
+                    responseLines?.append(usageLine.trimmingCharacters(in: .whitespacesAndNewlines))
+                    continuation.yield(ByteBuffer(string: usageLine))
+                }
+
+                continuation.yield(ByteBuffer(string: sseDone))
+                responseLines?.append("data: [DONE]")
+                await eventBox.append("sent [DONE] total_chars=\(prev.count) finish_reason=\(finishReason)")
+            } catch is CancellationError {
+                streamCancelled = true
+                await eventBox.append("structured stream cancelled by client")
+            } catch {
+                let classified = ApfelError.classify(error)
+                if case .refusal(let explanation) = classified {
+                    let refusalLine = sseDataLine(sseRefusalChunk(id: id, created: created, refusal: explanation))
+                    responseLines?.append(refusalLine.trimmingCharacters(in: .whitespacesAndNewlines))
+                    continuation.yield(ByteBuffer(string: refusalLine))
+
+                    let finishLine = sseDataLine(sseContentFilterFinishChunk(id: id, created: created))
+                    responseLines?.append(finishLine.trimmingCharacters(in: .whitespacesAndNewlines))
+                    continuation.yield(ByteBuffer(string: finishLine))
+
+                    completionTokens = await TokenCounter.shared.count(
+                        StreamErrorResolver.refusalCompletionText(prev: prev, explanation: explanation))
+                    if includeUsage {
+                        let usageChunk = sseUsageChunk(id: id, created: created, promptTokens: promptTokens, completionTokens: completionTokens)
+                        let usageLine = sseDataLine(usageChunk)
+                        responseLines?.append(usageLine.trimmingCharacters(in: .whitespacesAndNewlines))
+                        continuation.yield(ByteBuffer(string: usageLine))
+                    }
+
+                    continuation.yield(ByteBuffer(string: sseDone))
+                    responseLines?.append("data: [DONE]")
+                    await eventBox.append("sent refusal stream finish_reason=content_filter")
+                } else {
+                    let errPayload = OpenAIErrorResponse(error: .init(
+                        message: classified.openAIMessage, type: classified.openAIType, param: nil, code: nil))
+                    let errJSON = jsonString(errPayload, pretty: false)
+                    let errMsg = "data: \(errJSON)\n\n"
+                    responseLines?.append(errMsg.trimmingCharacters(in: .whitespacesAndNewlines))
+                    continuation.yield(ByteBuffer(string: errMsg))
+                    continuation.yield(ByteBuffer(string: sseDone))
+                    streamError = classified.openAIMessage
+                    await eventBox.append("structured stream error: \(classified.cliLabel) \(classified.openAIMessage)")
+                }
+            }
+
+            let completionLog = RequestLog(
+                id: "\(id)-stream",
+                timestamp: ISO8601DateFormatter().string(from: streamStart),
+                method: "POST",
+                path: "/v1/chat/completions/stream",
+                status: streamCancelled ? 499 : (streamError == nil ? 200 : 500),
+                duration_ms: Int(Date().timeIntervalSince(streamStart) * 1000),
+                stream: true,
+                estimated_tokens: completionTokens,
+                error: streamError,
+                request_body: requestBody,
+                response_body: responseLines.map { truncateForLog($0.joined(separator: "\n\n")) },
+                events: await eventBox.snapshot()
+            )
+            await serverState.logStore.append(completionLog)
+        }
+        taskBox.set(streamTask)
+
+        continuation.onTermination = { _ in
+            taskBox.cancel()
+            Task {
+                await cleanup.run {
+                    await serverState.semaphore.signal()
+                    await serverState.logStore.requestFinished()
+                }
+            }
+        }
+    }
+
+    return (
+        Response(status: .ok, headers: headers, body: .init(asyncSequence: responseStream)),
+        ChatRequestTrace(
+            stream: true,
+            estimatedTokens: promptTokens,
+            error: nil,
+            requestBody: requestBody,
+            responseBody: serverState.config.debug
+                ? "Streaming response in progress. See /v1/chat/completions/stream log for final SSE transcript."
+                : nil,
+            events: events + ["structured stream request accepted", "final stream completion logged separately"]
         )
     )
 }

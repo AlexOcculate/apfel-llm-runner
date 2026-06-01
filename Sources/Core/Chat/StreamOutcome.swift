@@ -58,4 +58,21 @@ public enum StreamErrorResolver {
             return .fatal(error)
         }
     }
+
+    /// Text whose tokens count toward `completion_tokens` when a refusal is
+    /// thrown mid-stream.
+    ///
+    /// A refusal can arrive AFTER the model has already streamed some content
+    /// (accumulated in `prev`). The completion-token total must reflect both the
+    /// already-streamed content and the refusal explanation. Returning the
+    /// concatenation (rather than summing two independent token counts) lets the
+    /// caller make a single `count()` call and avoids double-counting tokens at
+    /// the join boundary.
+    ///
+    /// - parameter prev: content already streamed before the refusal (possibly empty).
+    /// - parameter explanation: the refusal explanation text.
+    /// - returns: the combined text to be token-counted.
+    public static func refusalCompletionText(prev: String, explanation: String) -> String {
+        prev + explanation
+    }
 }

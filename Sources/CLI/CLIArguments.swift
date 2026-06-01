@@ -22,6 +22,7 @@ public struct CLIArguments: Sendable, Equatable {
         case benchmark
         case modelInfo = "model-info"
         case update
+        case tag
         case help
         case version
         case release
@@ -29,6 +30,11 @@ public struct CLIArguments: Sendable, Equatable {
         /// Whether this mode supports reading piped stdin as prompt input.
         /// Modes that accept a user prompt from the command line also accept
         /// it (or a prefix to it) from stdin.
+        ///
+        /// `.tag` reads stdin too, but the executable handles that read itself
+        /// (the text is classified, not appended to a prompt), so it is not
+        /// listed here -- this flag drives the shared prompt-assembly path in
+        /// main.swift that `.tag` deliberately bypasses.
         public var acceptsStdinInput: Bool {
             switch self {
             case .single, .stream: return true
@@ -73,6 +79,7 @@ public struct CLIArguments: Sendable, Equatable {
     // MARK: - Generation
 
     public var temperature: Double? = nil
+    public var topP: Double? = nil
     public var seed: UInt64? = nil
     public var maxTokens: Int? = nil
     public var permissive: Bool = false
@@ -175,17 +182,18 @@ extension CLIArguments {
 
         // Environment variable defaults (CLI flags override these).
         result.systemPrompt = env["APFEL_SYSTEM_PROMPT"]
-        result.serverPort = Int(env["APFEL_PORT"] ?? "") ?? 11434
+        result.serverPort = Int(env["APFEL_PORT"] ?? "")
+            .flatMap { (1...65535).contains($0) ? $0 : nil } ?? 11434
         result.serverHost = env["APFEL_HOST"] ?? "127.0.0.1"
         result.serverToken = env["APFEL_TOKEN"]
         result.mcpServerPaths = env["APFEL_MCP"].map { parseMCPServerPaths($0) } ?? []
         result.mcpTimeoutSeconds = Int(env["APFEL_MCP_TIMEOUT"] ?? "")
             .flatMap { $0 > 0 ? min($0, 300) : nil } ?? 5
         result.mcpBearerToken = env["APFEL_MCP_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
-        result.temperature = Double(env["APFEL_TEMPERATURE"] ?? "")
+        result.temperature = Double(env["APFEL_TEMPERATURE"] ?? "").flatMap { $0 >= 0 ? $0 : nil }
         result.maxTokens = Int(env["APFEL_MAX_TOKENS"] ?? "").flatMap { $0 > 0 ? $0 : nil }
         result.contextStrategy = env["APFEL_CONTEXT_STRATEGY"].flatMap { ContextStrategy(rawValue: $0) }
-        result.contextMaxTurns = env["APFEL_CONTEXT_MAX_TURNS"].flatMap { Int($0) }
+        result.contextMaxTurns = env["APFEL_CONTEXT_MAX_TURNS"].flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
         result.contextOutputReserve = env["APFEL_CONTEXT_OUTPUT_RESERVE"]
             .flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
 
@@ -196,7 +204,15 @@ extension CLIArguments {
         // participate in conflict detection.
         var context = ValidationContext()
 
+        // Positional subcommands: recognized only as the first argument so they
+        // never collide with prompt text (e.g. `apfel "tag this for me"` still
+        // sends a prompt). `tag` classifies stdin via the contentTagging
+        // specialized model; remaining args are parsed as normal flags.
         var i = 0
+        if args.first == "tag" {
+            result.mode = .tag
+            i = 1
+        }
         while i < args.count {
             switch args[i] {
 
@@ -368,6 +384,13 @@ extension CLIArguments {
                 }
                 result.temperature = t
 
+            case "--top-p":
+                i += 1
+                guard i < args.count, let p = Double(args[i]), p > 0, p <= 1 else {
+                    throw CLIErrors.requires("--top-p", "a number in (0, 1] (e.g., 0.9)")
+                }
+                result.topP = p
+
             case "--seed":
                 i += 1
                 guard i < args.count, let s = UInt64(args[i]) else {
@@ -390,7 +413,13 @@ extension CLIArguments {
             case "--retry":
                 result.retryEnabled = true
                 // Optional argument: --retry or --retry N (positive).
-                if i + 1 < args.count, let n = Int(args[i + 1]), n > 0 {
+                // A next token that parses as an integer is treated as the
+                // count; if it is non-positive, reject it like other numeric
+                // flags rather than silently ignoring it.
+                if i + 1 < args.count, let n = Int(args[i + 1]) {
+                    guard n > 0 else {
+                        throw CLIErrors.requires("--retry", "a positive number")
+                    }
                     result.retryCount = n
                     i += 1
                 }

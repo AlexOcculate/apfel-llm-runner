@@ -107,16 +107,34 @@ public enum ToolCallHandler {
             remaining = String(remaining[end.upperBound...])
         }
 
-        // 3. Extract balanced JSON object starting at {"tool_calls" (handles trailing text)
+        // 3. Extract balanced JSON object starting at {"tool_calls" (handles trailing text).
+        //    The brace counter is string-aware: braces inside quoted JSON strings
+        //    (e.g. the '}' in an id like "call_a}b") must not affect depth.
         if let range = text.range(of: "{\"tool_calls\"") {
             var depth = 0
+            var inString = false
+            var escaped = false
             var idx = range.lowerBound
             while idx < text.endIndex {
-                if text[idx] == "{" { depth += 1 }
-                else if text[idx] == "}" { depth -= 1 }
-                if depth == 0 {
-                    candidates.append(String(text[range.lowerBound...idx]))
-                    break
+                let ch = text[idx]
+                if inString {
+                    if escaped {
+                        escaped = false
+                    } else if ch == "\\" {
+                        escaped = true
+                    } else if ch == "\"" {
+                        inString = false
+                    }
+                } else if ch == "\"" {
+                    inString = true
+                } else if ch == "{" {
+                    depth += 1
+                } else if ch == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        candidates.append(String(text[range.lowerBound...idx]))
+                        break
+                    }
                 }
                 idx = text.index(after: idx)
             }

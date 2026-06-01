@@ -154,6 +154,7 @@ let contextConfig = ContextConfig(
 
 let sessionOpts = SessionOptions(
     temperature: parsed.temperature,
+    topP: parsed.topP,
     maxTokens: parsed.maxTokens,
     seed: parsed.seed,
     permissive: parsed.permissive,
@@ -228,6 +229,9 @@ do {
 
     case .update:
         performUpdate()
+
+    case .tag:
+        try await tagStdin(options: sessionOpts)
 
     case .modelInfo:
         await printModelInfo()

@@ -63,6 +63,12 @@ func startServer(config: ServerConfig, mcpManager: MCPManager? = nil) async thro
     let cachedContextSize = await tc.contextSize
     let cachedLangs = await tc.supportedLanguages
 
+    // Prewarm the model so the first chat completion does not pay the
+    // cold-start cost. No-op (and false) when the model is unavailable, so an
+    // unavailable model never crashes startup. The outcome is reported on
+    // /health as "prewarmed" (#169).
+    let prewarmed = await tc.prewarm()
+
     let router = Router()
 
     // Security middleware: origin check, token auth, CORS headers
@@ -81,6 +87,7 @@ func startServer(config: ServerConfig, mcpManager: MCPManager? = nil) async thro
             "active_requests": active,
             "context_window": cachedContextSize,
             "model_available": available,
+            "prewarmed": prewarmed,
             "supported_languages": cachedLangs
         ]
         if let data = try? JSONSerialization.data(withJSONObject: health, options: [.sortedKeys]),

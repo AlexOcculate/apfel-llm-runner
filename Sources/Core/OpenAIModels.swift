@@ -17,6 +17,8 @@ public struct ChatCompletionRequest: Decodable, Sendable, Equatable, Hashable {
     public let stream_options: StreamOptions?
     /// Sampling temperature override.
     public let temperature: Double?
+    /// Nucleus (top-p) sampling threshold override.
+    public let top_p: Double?
     /// Maximum completion tokens requested by the client.
     public let max_tokens: Int?
     /// Optional deterministic seed request.
@@ -53,6 +55,7 @@ public struct ChatCompletionRequest: Decodable, Sendable, Equatable, Hashable {
         stream: Bool? = nil,
         stream_options: StreamOptions? = nil,
         temperature: Double? = nil,
+        top_p: Double? = nil,
         max_tokens: Int? = nil,
         seed: Int? = nil,
         tools: [OpenAITool]? = nil,
@@ -73,6 +76,7 @@ public struct ChatCompletionRequest: Decodable, Sendable, Equatable, Hashable {
         self.stream = stream
         self.stream_options = stream_options
         self.temperature = temperature
+        self.top_p = top_p
         self.max_tokens = max_tokens
         self.seed = seed
         self.tools = tools
@@ -363,12 +367,35 @@ public enum ToolChoice: Decodable, Sendable, Equatable, Hashable {
 
 /// OpenAI-compatible response-format request.
 public struct ResponseFormat: Decodable, Sendable, Equatable, Hashable {
-    /// The requested response format type, such as `text` or `json_object`.
+    /// The requested response format type, such as `text`, `json_object`, or
+    /// `json_schema`.
     public let type: String
+    /// The `json_schema` payload, present only when `type == "json_schema"`.
+    public let json_schema: JSONSchemaSpec?
 
     /// Creates a response-format request.
-    public init(type: String) {
+    public init(type: String, json_schema: JSONSchemaSpec? = nil) {
         self.type = type
+        self.json_schema = json_schema
+    }
+}
+
+/// OpenAI `response_format.json_schema` payload — a named JSON Schema the model
+/// output must conform to (guaranteed structured outputs).
+public struct JSONSchemaSpec: Decodable, Sendable, Equatable, Hashable {
+    /// The schema name (used as the root schema's name).
+    public let name: String
+    /// The raw JSON Schema the output must conform to.
+    public let schema: RawJSON?
+    /// Whether strict conformance is requested. apfel always generates against
+    /// the schema, so this is accepted and recorded but does not change behaviour.
+    public let strict: Bool?
+
+    /// Creates a JSON-schema response-format spec.
+    public init(name: String, schema: RawJSON?, strict: Bool? = nil) {
+        self.name = name
+        self.schema = schema
+        self.strict = strict
     }
 }
 

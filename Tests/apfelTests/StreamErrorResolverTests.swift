@@ -57,6 +57,35 @@ func runStreamErrorResolverTests() {
         if case .fatal(let err) = outcome { try assertEqual(err, ApfelError.refusal("blocked")) }
     }
 
+    // MARK: - #179 Refusal completion-token text (pre-refusal content must count)
+
+    test("refusalCompletionText includes pre-refusal streamed content + explanation") {
+        // The bug: completion_tokens counted only the refusal explanation,
+        // dropping the content already streamed in `prev`. The text to count
+        // must contain BOTH.
+        let text = StreamErrorResolver.refusalCompletionText(
+            prev: "Here is the first part of the answer.",
+            explanation: "I cannot continue with this request.")
+        try assertEqual(text, "Here is the first part of the answer.I cannot continue with this request.")
+    }
+
+    test("refusalCompletionText with empty prev is just the explanation") {
+        let text = StreamErrorResolver.refusalCompletionText(prev: "", explanation: "blocked")
+        try assertEqual(text, "blocked")
+    }
+
+    test("refusalCompletionText with empty explanation is just the streamed prev") {
+        let text = StreamErrorResolver.refusalCompletionText(prev: "partial answer", explanation: "")
+        try assertEqual(text, "partial answer")
+    }
+
+    test("refusalCompletionText never drops the pre-refusal content") {
+        let prev = "a long pre-refusal response that must not be lost"
+        let text = StreamErrorResolver.refusalCompletionText(prev: prev, explanation: " then refused")
+        try assertTrue(text.contains(prev), "pre-refusal content must survive in the counted text")
+        try assertTrue(text.count > prev.count, "explanation must also be included")
+    }
+
     // MARK: - Every other ApfelError case is fatal regardless of prev
 
     test("guardrailViolation -> fatal in both prev states") {

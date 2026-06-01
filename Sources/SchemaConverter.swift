@@ -104,6 +104,21 @@ enum SchemaConverter {
         return (native, fallback)
     }
 
+    /// Build a native `GenerationSchema` from a caller-supplied JSON Schema.
+    ///
+    /// Used by the `response_format: json_schema` server path (#167) to drive
+    /// guaranteed structured outputs via schema-guided generation. Reuses the
+    /// same JSON -> SchemaIR parser and IR -> DynamicGenerationSchema adapter as
+    /// tool-call conversion, so the supported subset is identical.
+    ///
+    /// - Throws: `SchemaParser.Error` for malformed/unsupported JSON Schema, or
+    ///   a `GenerationSchema` construction error. Callers map these to a 400.
+    static func generationSchema(fromJSON json: String, name: String) throws -> GenerationSchema {
+        let ir = try SchemaParser.parse(json: json, name: name)
+        let dynSchema = try dynamicSchema(from: ir)
+        return try GenerationSchema(root: dynSchema, dependencies: [])
+    }
+
     /// Convert a tool call's arguments JSON string to GeneratedContent.
     /// Returns nil on failure instead of crashing the process.
     static func makeArguments(_ json: String) -> GeneratedContent? {
@@ -140,11 +155,19 @@ enum SchemaConverter {
             if let values = enumValues {
                 return DynamicGenerationSchema(name: name, description: description, anyOf: values)
             }
-            return DynamicGenerationSchema(name: name, description: description, properties: [])
+            // A plain string leaf must map to the String primitive, not an empty
+            // object. The empty-object form produced "{}" for scalar fields under
+            // schema-guided generation (#167).
+            return DynamicGenerationSchema(type: String.self)
 
-        case .number(let name, let description),
-             .bool(let name, let description):
-            return DynamicGenerationSchema(name: name, description: description, properties: [])
+        case .number:
+            // JSON Schema integer/number. The IR conflates the two; on-device
+            // structured output uses Int (a valid JSON number) as the default
+            // scalar so fields decode as numbers, not empty objects (#167).
+            return DynamicGenerationSchema(type: Int.self)
+
+        case .bool:
+            return DynamicGenerationSchema(type: Bool.self)
 
         case .array(_, let items):
             let inner = try dynamicSchema(from: items)

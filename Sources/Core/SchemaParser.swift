@@ -14,6 +14,7 @@ public enum SchemaParser {
         case invalidJSON
         case unsupportedType(String)
         case missingArrayItems
+        case invalidProperty(String)
     }
 
     public static func parse(json: String, name: String) throws -> SchemaIR {
@@ -42,7 +43,9 @@ public enum SchemaParser {
             var properties: [SchemaIR.Property] = []
             properties.reserveCapacity(sortedKeys.count)
             for key in sortedKeys {
-                guard let propSchema = propsDict[key] as? [String: Any] else { continue }
+                guard let propSchema = propsDict[key] as? [String: Any] else {
+                    throw Error.invalidProperty(key)
+                }
                 let childIR = try parseObject(propSchema, name: key)
                 let childDesc = propSchema["description"] as? String
                 properties.append(.init(

@@ -46,7 +46,7 @@ func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options
         var msgs: [OpenAIMessage] = []
         if let sys = systemPrompt { msgs.append(OpenAIMessage(role: "system", content: .text(sys))) }
         msgs.append(OpenAIMessage(role: "user", content: .text(prompt)))
-        (session, finalPrompt) = try await ContextManager.makeSession(
+        (session, finalPrompt, _) = try await ContextManager.makeSession(
             messages: msgs, tools: mcpTools, options: options, jsonMode: false, toolChoice: nil)
     } else {
         session = makeSession(systemPrompt: systemPrompt, options: options)
@@ -72,6 +72,67 @@ func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options
 
     if result.finishReason == .length {
         printStderr("\(styled("apfel:", .yellow)) response truncated at the context window (finish_reason=length). Pass --max-tokens to control the cap explicitly.")
+    }
+}
+
+// MARK: - Content Tagging
+
+/// Structured tag output for guided generation against the contentTagging
+/// specialized model. The model fills `tags` with topic/keyword labels for the
+/// supplied text.
+@Generable
+struct TagResult: Equatable {
+    @Guide(description: "Relevant topic and keyword tags describing the text.")
+    var tags: [String]
+}
+
+/// JSON wrapper emitted by `apfel tag -o json`. Pipe-friendly: a single object
+/// with a `tags` array.
+struct TagOutput: Encodable {
+    let tags: [String]
+}
+
+/// Read text from stdin and classify it into tags using the on-device
+/// contentTagging specialized model. CLI-only surface (no server route) -- this
+/// is a UNIX utility, not part of the OpenAI-compatible API.
+///
+/// - plain output: one tag per line.
+/// - json output: `{"tags":[...]}`.
+func tagStdin(options: SessionOptions = .defaults) async throws {
+    var lines: [String] = []
+    if isatty(STDIN_FILENO) == 0 {
+        while let line = readLine(strippingNewline: false) {
+            lines.append(line)
+        }
+    }
+    let input = lines.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !input.isEmpty else {
+        printError("no input provided -- pipe text to classify, e.g. echo \"...\" | apfel tag")
+        exit(exitUsageError)
+    }
+
+    debugLog("tag", "input_length=\(input.count)")
+
+    let model = SystemLanguageModel(useCase: .contentTagging)
+    let session = LanguageModelSession(model: model)
+    let genOpts = makeGenerationOptions(options)
+
+    let result = try await session.respond(
+        to: input,
+        generating: TagResult.self,
+        options: genOpts
+    ).content
+
+    // Trim whitespace and drop empties so downstream pipes get clean tokens.
+    let tags = result.tags
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+    switch outputFormat {
+    case .plain:
+        for tag in tags { print(tag) }
+    case .json:
+        print(jsonString(TagOutput(tags: tags)), terminator: "")
     }
 }
 
@@ -431,6 +492,7 @@ func printUsage() {
       \(appName) --chat                   Interactive conversation
       \(appName) --stream <prompt>        Stream a single response
       \(appName) --serve                  Start OpenAI-compatible HTTP server
+      \(appName) tag < file               Classify piped text into tags
       \(appName) --benchmark              Run internal performance benchmarks
 
     \(styled("OPTIONS:", .yellow, .bold))
@@ -440,7 +502,8 @@ func printUsage() {
       -o, --output <format>     Output format: plain, json [default: plain]
       -q, --quiet               Suppress non-essential output
           --no-color             Disable colored output
-          --temperature <n>      Sampling temperature (e.g., 0.7)
+          --temperature <n>      Sampling temperature (e.g., 0.7); 0 = deterministic
+          --top-p <n>            Nucleus sampling threshold in (0, 1] (e.g., 0.9)
           --seed <n>             Random seed for reproducible output
           --max-tokens <n>       Maximum response tokens
           --mcp <path|url>       Attach local or remote MCP tool server (repeatable)
