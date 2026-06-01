@@ -73,6 +73,7 @@ public struct CLIArguments: Sendable, Equatable {
     // MARK: - Generation
 
     public var temperature: Double? = nil
+    public var topP: Double? = nil
     public var seed: UInt64? = nil
     public var maxTokens: Int? = nil
     public var permissive: Bool = false
@@ -368,6 +369,13 @@ extension CLIArguments {
                     throw CLIErrors.requires("--temperature", "a non-negative number (e.g., 0.7)")
                 }
                 result.temperature = t
+
+            case "--top-p":
+                i += 1
+                guard i < args.count, let p = Double(args[i]), p > 0, p <= 1 else {
+                    throw CLIErrors.requires("--top-p", "a number in (0, 1] (e.g., 0.9)")
+                }
+                result.topP = p
 
             case "--seed":
                 i += 1

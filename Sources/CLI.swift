@@ -440,7 +440,8 @@ func printUsage() {
       -o, --output <format>     Output format: plain, json [default: plain]
       -q, --quiet               Suppress non-essential output
           --no-color             Disable colored output
-          --temperature <n>      Sampling temperature (e.g., 0.7)
+          --temperature <n>      Sampling temperature (e.g., 0.7); 0 = deterministic
+          --top-p <n>            Nucleus sampling threshold in (0, 1] (e.g., 0.9)
           --seed <n>             Random seed for reproducible output
           --max-tokens <n>       Maximum response tokens
           --mcp <path|url>       Attach local or remote MCP tool server (repeatable)

@@ -101,6 +101,15 @@ Disable ANSI color output. Equivalent to setting
 .BI \-\-temperature " n"
 Sampling temperature. Non-negative float, e.g.
 .BR 0.7 .
+A value of
+.B 0
+gives deterministic (greedy) output.
+.TP
+.BI \-\-top-p " n"
+Nucleus (top-p) sampling threshold. Float in
+.BR "(0, 1]" ,
+e.g.
+.BR 0.9 .
 .TP
 .BI \-\-seed " n"
 Random seed for reproducible output. Positive integer.

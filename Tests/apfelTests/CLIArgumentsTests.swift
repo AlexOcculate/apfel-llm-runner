@@ -480,6 +480,43 @@ func runCLIArgumentsTests() {
         }
     }
 
+    test("--top-p parses") {
+        let args = try CLIArguments.parse(["--top-p", "0.9", "hi"])
+        try assertEqual(args.topP, 0.9)
+    }
+
+    test("--top-p of 1 is valid") {
+        let args = try CLIArguments.parse(["--top-p", "1", "hi"])
+        try assertEqual(args.topP, 1.0)
+    }
+
+    test("--top-p zero throws") {
+        do {
+            _ = try CLIArguments.parse(["--top-p", "0"])
+            try assertTrue(false, "should have thrown")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--top-p"))
+        }
+    }
+
+    test("--top-p above 1 throws") {
+        do {
+            _ = try CLIArguments.parse(["--top-p", "1.5"])
+            try assertTrue(false, "should have thrown")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--top-p"))
+        }
+    }
+
+    test("--top-p non-numeric throws") {
+        do {
+            _ = try CLIArguments.parse(["--top-p", "wide"])
+            try assertTrue(false, "should have thrown")
+        } catch let e as CLIParseError {
+            try assertTrue(e.message.contains("--top-p"))
+        }
+    }
+
     test("--seed parses") {
         let args = try CLIArguments.parse(["--seed", "42", "hi"])
         try assertEqual(args.seed, 42)

@@ -154,6 +154,7 @@ let contextConfig = ContextConfig(
 
 let sessionOpts = SessionOptions(
     temperature: parsed.temperature,
+    topP: parsed.topP,
     maxTokens: parsed.maxTokens,
     seed: parsed.seed,
     permissive: parsed.permissive,

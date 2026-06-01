@@ -99,6 +99,18 @@ func runOpenAIModelsTests() {
         try assertEqual(raw.value, "true")
     }
 
+    test("ChatCompletionRequest decodes top_p") {
+        let json = #"{"model":"apple-foundationmodel","messages":[{"role":"user","content":"hi"}],"top_p":0.9}"#
+        let req = try decode(ChatCompletionRequest.self, from: json)
+        try assertEqual(req.top_p, 0.9)
+    }
+
+    test("ChatCompletionRequest top_p defaults to nil when absent") {
+        let json = #"{"model":"apple-foundationmodel","messages":[{"role":"user","content":"hi"}]}"#
+        let req = try decode(ChatCompletionRequest.self, from: json)
+        try assertNil(req.top_p)
+    }
+
     test("RawJSON decodes arrays as valid JSON array text") {
         let raw = try decode(RawJSON.self, from: #"[1,"two",false]"#)
         let parsed = try JSONSerialization.jsonObject(with: Data(raw.value.utf8)) as? [Any]

@@ -13,6 +13,7 @@ import ApfelCore
 /// Options forwarded from CLI flags or OpenAI request parameters.
 struct SessionOptions: Sendable {
     let temperature: Double?
+    let topP: Double?
     let maxTokens: Int?
     let seed: UInt64?
     let permissive: Bool
@@ -21,19 +22,35 @@ struct SessionOptions: Sendable {
     let retryCount: Int
 
     static let defaults = SessionOptions(
-        temperature: nil, maxTokens: nil, seed: nil, permissive: false,
+        temperature: nil, topP: nil, maxTokens: nil, seed: nil, permissive: false,
         contextConfig: .defaults, retryEnabled: false, retryCount: 3
     )
 }
 
 // MARK: - Generation Options
 
-func makeGenerationOptions(_ opts: SessionOptions) -> GenerationOptions {
-    let sampling: GenerationOptions.SamplingMode? = opts.seed.map {
-        .random(top: 50, seed: $0)
+/// Translate the pure `SamplingDecision` into the SDK's sampling mode.
+func makeSamplingMode(_ decision: SamplingDecision) -> GenerationOptions.SamplingMode? {
+    switch decision {
+    case .greedy:
+        return .greedy
+    case let .nucleus(probabilityThreshold, seed):
+        return .random(probabilityThreshold: probabilityThreshold, seed: seed)
+    case let .topK(top, seed):
+        return .random(top: top, seed: seed)
+    case .defaultMode:
+        return nil
     }
+}
+
+func makeGenerationOptions(_ opts: SessionOptions) -> GenerationOptions {
+    let decision = SamplingDecision.resolve(
+        temperature: opts.temperature,
+        topP: opts.topP,
+        seed: opts.seed
+    )
     return GenerationOptions(
-        sampling: sampling,
+        sampling: makeSamplingMode(decision),
         temperature: opts.temperature,
         maximumResponseTokens: opts.maxTokens
     )

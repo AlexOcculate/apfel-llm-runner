@@ -104,16 +104,46 @@ def test_168_top_p_and_greedy_mapping():
     Verified NOT externally observable: the on-device model is already
     empirically deterministic at temperature:0 for ordinary prompts (so an
     output-equality test is a false green), and top_p has no API-visible effect.
-    The mapping lives in Session.makeGenerationOptions in the FoundationModels-
-    coupled executable target, which the unit runner cannot import. A
-    deterministic test needs the fix to expose makeGenerationOptions in a
-    testable library. RED until then.
+    The mapping lived in Session.makeGenerationOptions in the FoundationModels-
+    coupled executable target, which the unit runner cannot import.
+
+    FIXED (#168): the sampling policy was extracted into a pure,
+    FoundationModels-free decision — SamplingDecision.resolve(temperature:topP:seed:)
+    in ApfelCore — so it is exercised deterministically by the unit suite
+    (Tests/apfelTests/SamplingDecisionTests.swift, runSamplingDecisionTests):
+    top_p -> .nucleus(probabilityThreshold:seed:), temperature:0 (no top_p) ->
+    .greedy, seed-only -> .topK(top:50,seed:). The executable's
+    makeGenerationOptions/makeSamplingMode translate that decision into the SDK's
+    GenerationOptions.SamplingMode. SessionOptions and the OpenAI request type
+    now carry top_p, plumbed from both the server (Sources/Handlers.swift) and
+    the CLI (`--top-p`).
+
+    This source-level guard pins the wiring so the mapping cannot silently
+    regress, and the wire smoke test below confirms a top_p request still 200s.
     """
-    pytest.fail(
-        "#168 RED placeholder: top_p/greedy mapping is not externally observable "
-        "(temperature:0 is already deterministic here) and lives in the executable "
-        "target; deterministic test needs the fix to expose makeGenerationOptions. "
-        "Tracked on issue #168.")
+    session = (ROOT / "Sources" / "Session.swift").read_text()
+    assert "SamplingDecision.resolve(" in session, (
+        "makeGenerationOptions must derive its sampling mode from the pure "
+        "SamplingDecision.resolve seam (#168)")
+    assert ".random(probabilityThreshold: probabilityThreshold, seed: seed)" in session, (
+        "top_p (nucleus) must map to .random(probabilityThreshold:seed:) (#168)")
+    assert "return .greedy" in session, (
+        "temperature:0 (no top_p) must map to .greedy for determinism (#168)")
+
+    decision = (ROOT / "Sources" / "Core" / "SamplingDecision.swift").read_text()
+    assert "public static func resolve(" in decision, (
+        "the pure sampling-policy seam must live in ApfelCore so it is "
+        "unit-testable without FoundationModels (#168)")
+
+
+def test_168_top_p_request_succeeds():
+    """A chat request carrying top_p must be accepted (200), not rejected (#168)."""
+    resp = _chat({
+        "model": MODEL,
+        "messages": [{"role": "user", "content": "Say hi."}],
+        "top_p": 0.9,
+    })
+    assert resp.status_code == 200, f"top_p request should succeed, got {resp.status_code}: {resp.text}"
 
 
 # ---------------------------------------------------------------------------

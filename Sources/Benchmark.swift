@@ -68,6 +68,7 @@ func runBenchmarks() async throws {
 private func benchmarkReport() async throws -> BenchmarkReport {
     let options = SessionOptions(
         temperature: 0.2,
+        topP: nil,
         maxTokens: 256,
         seed: 42,
         permissive: false,
