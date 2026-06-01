@@ -84,8 +84,8 @@ HTTP Server (/v1/*) ───────┘   ContextManager → Transcript API
 
 ## Current Status
 
-- Version: `1.4.0` (source of truth: `.version`)
-- Tests: 646 unit + 273 integration
+- Version: `1.5.0` (source of truth: `.version`)
+- Tests: 650 unit + 273 integration
 - Distribution: homebrew-core (`brew install apfel`), nixpkgs (`nix profile install nixpkgs#apfel-llm`), and the Arthur-Ficial/homebrew-tap
 - Stability policy: [STABILITY.md](STABILITY.md)
 - Security policy: [SECURITY.md](SECURITY.md)
