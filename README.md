@@ -400,6 +400,7 @@ Projects built on apfel. Each ships as its own repo + Homebrew formula.
 | [**apfel-mcp**](https://apfel-mcp.franzai.com) | Token-budget-optimized MCPs for the 4096 window: `url-fetch`, `ddg-search`, `search-and-fetch`. | `brew install Arthur-Ficial/tap/apfel-mcp` |
 | [**apfel-gui**](https://github.com/Arthur-Ficial/apfel-gui) | SwiftUI debug inspector: request timeline, MCP protocol viewer, TTS/STT. | `brew install Arthur-Ficial/tap/apfel-gui` |
 | [**apfel-run**](https://github.com/Arthur-Ficial/apfel-run) | UNIX wrapper adding a persistent MCP registry + TOML config on top of `apfel`. | `brew install Arthur-Ficial/tap/apfel-run` |
+| [**apfel-tag**](https://github.com/Arthur-Ficial/apfel-tag) | On-device content tagging CLI: pipe text in, get tags/topics/emotions out. | `brew install Arthur-Ficial/tap/apfel-tag` |
 | [**apfel-server-kit**](https://github.com/Arthur-Ficial/apfel-server-kit) | Swift package for ecosystem tools: discover, spawn, and stream from a local `apfel --serve`. | Swift Package |
 
 ## Community Projects
