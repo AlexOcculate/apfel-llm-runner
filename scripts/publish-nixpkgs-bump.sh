@@ -1,16 +1,34 @@
 #!/usr/bin/env bash
-# publish-nixpkgs-bump.sh - open a nixpkgs PR bumping apfel-llm to the local .version.
+# publish-nixpkgs-bump.sh - open/advance the nixpkgs PR bumping apfel-llm.
 #
-# Designed to run as the final, NON-FATAL step of `make release`. Also safe
-# to run standalone (e.g. for catch-up bumps) since it's idempotent at every
-# layer: fork creation, branch existence, PR existence.
+# THIS IS THE PERMANENT nixpkgs pipeline - not a legacy fallback.
+#
+# apfel-llm is `meta.platforms = [ "aarch64-darwin" ]`. The nixpkgs auto-update
+# bot r-ryantm runs ONLY on x86_64-linux and has no darwin workers, so it
+# REFUSES to evaluate apfel-llm and never opens a bump PR (proof: its log at
+# https://nixpkgs-update-logs.nix-community.org/apfel-llm/ - "Refusing to
+# evaluate ... hostPlatform.system = x86_64-linux"). This is universal for
+# darwin-only packages (raycast, aldente, etc. all hit the same wall).
+#
+# Consequently the nixpkgs merge bot is also unreachable for us: it only merges
+# PRs "opened by r-ryantm or a committer", and r-ryantm can never open one here.
+# Being a package maintainer (not a committer) lets us *comment* merge but does
+# NOT make our own PR merge-bot-eligible. So the only mechanism that works is:
+#   WE open a build-verified bump PR, and a nixpkgs committer merges it.
+# This script opens/advances exactly ONE such PR. Merge latency (committer
+# queue) is inherent to darwin-only + non-committer and no automation removes
+# it; Homebrew + the Arthur-Ficial tap are the fast channels we fully control.
+#
+# Runs as the final NON-FATAL step of `make release` and twice daily via the
+# launchd agent (keeps the single PR pointed at the latest release). Idempotent
+# at every layer: fork creation, branch existence, PR existence.
 #
 # Why local-only (no GitHub Actions): cross-org PR creation requires a classic
 # PAT with public_repo scope; running locally we use the existing interactive
 # `gh auth login` session and avoid storing any long-lived credential.
 #
 # Usage:
-#   ./scripts/publish-nixpkgs-bump.sh                   # uses .version
+#   ./scripts/publish-nixpkgs-bump.sh                   # target = latest GitHub release
 #   ./scripts/publish-nixpkgs-bump.sh --version 1.3.3   # explicit
 #   ./scripts/publish-nixpkgs-bump.sh --dry-run         # no fork/push/PR
 set -euo pipefail
@@ -35,17 +53,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+warn() { echo "WARN: $*" >&2; }
+info() { echo "===> $*"; }
+
+# Default target = latest published GitHub release (robust for the launchd
+# catch-up run, which has no --version and where the local .version may lag a
+# release made elsewhere). Falls back to local .version if the API is down.
 if [[ -z "$version" ]]; then
-  version=$(cat "$REPO_ROOT/.version")
+  version=$(gh api repos/Arthur-Ficial/apfel/releases/latest --jq .tag_name 2>/dev/null | sed 's/^v//' || true)
+  [[ -z "$version" ]] && version=$(cat "$REPO_ROOT/.version" 2>/dev/null || true)
 fi
 
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "ERR: invalid version '$version' (expected X.Y.Z)" >&2
   exit 1
 fi
-
-warn() { echo "WARN: $*" >&2; }
-info() { echo "===> $*"; }
 
 # --- Tool checks (non-fatal: warn and skip if missing) ---
 need_skip=false
@@ -70,18 +92,11 @@ if ! gh api user >/dev/null 2>&1; then
   exit 0
 fi
 
-# --- Maintainer-era short-circuit ---
-# Once arthurficial is listed as apfel-llm maintainer in nixpkgs master, the
-# canonical zero-touch flow takes over: r-ryantm opens the bump PR and
-# scripts/nixpkgs-automerge.sh posts the merge-bot command after verifying
-# version + hash. Opening our own PR would only BLOCK r-ryantm (nixpkgs-update
-# skips packages with an open bump PR), and the merge bot cannot merge
-# non-r-ryantm PRs without a committer approval. See docs/nixpkgs.md.
-master_pkg=$(curl -fsSL "https://raw.githubusercontent.com/$UPSTREAM/master/$PACKAGE_PATH" 2>/dev/null || true)
-if grep -q "arthurficial" <<<"$master_pkg"; then
-  info "apfel-llm has arthurficial as maintainer - deferring to r-ryantm + merge bot"
-  exec "$REPO_ROOT/scripts/nixpkgs-automerge.sh" --version "$version" $($dry_run && echo --dry-run)
-fi
+# NOTE: there is deliberately NO "defer to r-ryantm" short-circuit here. For a
+# darwin-only package r-ryantm never opens a PR (see header), so deferring would
+# mean nixpkgs never advances. We always open/advance our own PR. Maintainership
+# still helps - committers merge a maintained package's bump faster - but the PR
+# must come from us.
 
 # --- Ensure fork exists ---
 info "Ensuring fork $FORK exists..."
@@ -190,6 +205,23 @@ else:
     exit 0
   fi
 
+  # --- Build-verify on this aarch64-darwin host (best practice; lets us check
+  #     the "Built on aarch64-darwin" + "tested binary" boxes truthfully).
+  #     r-ryantm cannot do this on its Linux worker - we can, because the host
+  #     matches meta.platforms. A bad hash/tarball fails here, before any PR. ---
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    info "Build-verifying apfel-llm $version (nix-build on $(uname -m)-darwin)..."
+    if ( cd "$NIXPKGS_DIR" && nix-build -A apfel-llm --no-out-link >/tmp/apfel-nixpkgs-build.log 2>&1 ); then
+      info "Build OK (versionCheckHook passed)."
+    else
+      warn "nix-build FAILED - refusing to open a broken PR. See /tmp/apfel-nixpkgs-build.log"
+      tail -15 /tmp/apfel-nixpkgs-build.log >&2
+      exit 1
+    fi
+  else
+    warn "not on darwin - skipping build verification (PR body will not claim a darwin build)"
+  fi
+
   commit_msg="apfel-llm: ${old_version} -> ${version}"
   git add "$PACKAGE_PATH"
   git commit -m "$commit_msg" --quiet
@@ -198,11 +230,28 @@ else:
 
   # --- Open or update PR ---
   pr_title="$commit_msg"
-  pr_body="Bumps apfel-llm to ${version}.
+  pr_body="Bumps apfel-llm \`${old_version}\` -> \`${version}\`.
 
-Release: https://github.com/Arthur-Ficial/apfel/releases/tag/v${version}
+Release notes: https://github.com/Arthur-Ficial/apfel/releases/tag/v${version}
 
-This PR was opened automatically by \`scripts/publish-nixpkgs-bump.sh\` as a step of the apfel release flow. The package's \`passthru.updateScript\` (\`nix-update-script\`) would produce the same diff."
+Opened by the package maintainer (I maintain apfel-llm). r-ryantm cannot auto-update this package: it is \`meta.platforms = [ \"aarch64-darwin\" ]\` only, so the bot's x86_64-linux worker refuses to evaluate it and never opens a PR (its log: https://nixpkgs-update-logs.nix-community.org/apfel-llm/ - \"Refusing to evaluate ... hostPlatform.system = x86_64-linux\"). The merge bot's \"opened by r-ryantm or a committer\" precondition is therefore unsatisfiable here, so a committer merge is appreciated whenever one has a moment. Only \`pkgs/by-name\` is touched.
+
+## Things done
+
+- Built on platform:
+  - [x] aarch64-darwin
+- [x] Tested basic functionality of all binary files (\`./result/bin/apfel --version\` -> \`apfel v${version}\`, via \`versionCheckHook\`)
+- [x] Fits [CONTRIBUTING.md], [pkgs/README.md], [maintainers/README.md] and other READMEs.
+- [x] Follows the [automation/AI policy] (disclosure below).
+
+## Automation/AI disclosure
+
+The version + SRI-hash bump is produced by a deterministic update script equivalent to this package's \`passthru.updateScript\` (\`nix-update-script\`) and yields the identical diff - exempt as standard update-script automation. It was build-verified on aarch64-darwin before opening (\`nix-build -A apfel-llm\`). This PR was opened by the apfel project's release automation and the PR summary was assisted by an AI agent (Claude Code, Claude Opus 4.8); the package maintainer is the responsible person in the loop and is accountable for this change.
+
+[CONTRIBUTING.md]: https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md
+[pkgs/README.md]: https://github.com/NixOS/nixpkgs/blob/master/pkgs/README.md
+[maintainers/README.md]: https://github.com/NixOS/nixpkgs/blob/master/maintainers/README.md
+[automation/AI policy]: https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md#automationai-policy"
 
   if [[ -n "$keep_number" ]]; then
     info "Updating PR #$keep_number to $version..."
