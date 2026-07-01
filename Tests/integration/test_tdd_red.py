@@ -302,3 +302,58 @@ def test_182_streaming_retry_prints_output_once():
     a client, so there is nothing left to assert at the wire boundary here.
     """
     pass
+
+
+# ---------------------------------------------------------------------------
+# #219 anyOf/oneOf/type-arrays — nullable unions parse, unsupported ones 400
+# ---------------------------------------------------------------------------
+
+def test_219_json_schema_unsupported_union_returns_400():
+    """An unsupported union in a json_schema must be an honest 400, not a silent
+    accept of an empty (unconstrained) schema (#219).
+
+    Server-only: schema conversion fails before the model is invoked, so this
+    runs anywhere the server is up.
+    """
+    schema = {
+        "type": "object",
+        "properties": {"x": {"anyOf": [{"type": "string"}, {"type": "number"}]}},
+        "required": ["x"],
+    }
+    resp = _chat({
+        "model": MODEL,
+        "messages": [{"role": "user", "content": "give me an x"}],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "Bad", "schema": schema},
+        },
+    })
+    assert resp.status_code == 400, (
+        f"unsupported union schema must 400, got {resp.status_code}: {resp.text}")
+    assert resp.json()["error"]["type"] == "invalid_request_error"
+
+
+def test_219_json_schema_nullable_property_conforms():
+    """A nullable (Optional[...]) property parses and generation is constrained
+    to the real schema, not an empty object (#219). Model-dependent."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "nickname": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+        "required": ["name", "nickname"],
+        "additionalProperties": False,
+    }
+    resp = _chat({
+        "model": MODEL,
+        "messages": [{"role": "user", "content": "Return a person named Alice with no nickname."}],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "Person", "schema": schema, "strict": True},
+        },
+    })
+    assert resp.status_code == 200, (
+        f"nullable-property json_schema should succeed, got {resp.status_code}: {resp.text}")
+    data = json.loads(resp.json()["choices"][0]["message"]["content"])
+    assert "name" in data, f"schema must constrain output to real properties, got {data}"
