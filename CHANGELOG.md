@@ -9,6 +9,7 @@ and this project adheres to [https://semver.org/](https://semver.org/).
 
 ### Fixed
 
+- `top_p` outside `[0, 1]` and `temperature` above `2` now return `400 invalid_request_error` instead of passing through to FoundationModels and surfacing as an opaque `500`. The existing `temperature < 0` check is unchanged; OpenAI caps `temperature` at 2 and requires `top_p` in `[0, 1]` (#235).
 - A `/v1/chat/completions` request body over 1 MiB now returns `413` with an OpenAI error object, CORS headers, and a request-log entry, instead of a bare `413` with `Content-Length: 0` (no error object, unreadable by browser clients, unlogged). The over-limit `collect` error is caught inside the handler and returned as a normal response so the CORS middleware and request logger both run (#234).
 - Empty or null `content` in the last (non-tool) user message of a `/v1/chat/completions` request now returns `400 invalid_request_error` ("The last message must have non-empty 'content'") instead of `500 server_error`. A missing prompt is a client-input problem, not a server fault (#233).
 - Streaming requests that fail before the SSE body is built (validation failure, bad `json_schema`, context-build failure) no longer leak a concurrency permit and an `active_requests` count. Previously `--max-concurrent` (default 5) malformed `"stream": true` requests permanently exhausted server capacity - a remote unauthenticated DoS. Cleanup is now keyed on an explicit `ownsCleanup` trace flag set only by live SSE stream responses, instead of on the requested `stream` value (#213).

@@ -175,6 +175,12 @@ public enum ChatRequestValidator {
         if let temp = request.temperature, temp < 0 {
             return .invalidParameterValue("'temperature' must be non-negative, got \(temp)")
         }
+        if let temp = request.temperature, temp > 2 {
+            return .invalidParameterValue("'temperature' must be between 0 and 2, got \(temp)")
+        }
+        if let topP = request.top_p, topP < 0 || topP > 1 {
+            return .invalidParameterValue("'top_p' must be between 0 and 1, got \(topP)")
+        }
         if let seed = request.seed, seed < 0 {
             return .invalidParameterValue("'seed' must be a non-negative integer, got \(seed)")
         }

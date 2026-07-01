@@ -242,6 +242,57 @@ func runChatRequestValidatorTests() {
         }
     }
 
+    test("validator rejects temperature > 2 (#235)") {
+        let request = try decode(
+            ChatCompletionRequest.self,
+            from: #"{"model":"\#(M)","messages":[{"role":"user","content":"hi"}],"temperature":5.0}"#
+        )
+        if case .invalidParameterValue = ChatRequestValidator.validate(request) { } else {
+            throw TestFailure("expected .invalidParameterValue for temperature=5.0")
+        }
+    }
+
+    test("validator rejects top_p > 1 (#235)") {
+        let request = try decode(
+            ChatCompletionRequest.self,
+            from: #"{"model":"\#(M)","messages":[{"role":"user","content":"hi"}],"top_p":2.0}"#
+        )
+        if case .invalidParameterValue = ChatRequestValidator.validate(request) { } else {
+            throw TestFailure("expected .invalidParameterValue for top_p=2.0")
+        }
+    }
+
+    test("validator rejects top_p < 0 (#235)") {
+        let request = try decode(
+            ChatCompletionRequest.self,
+            from: #"{"model":"\#(M)","messages":[{"role":"user","content":"hi"}],"top_p":-0.5}"#
+        )
+        if case .invalidParameterValue = ChatRequestValidator.validate(request) { } else {
+            throw TestFailure("expected .invalidParameterValue for top_p=-0.5")
+        }
+    }
+
+    test("validator accepts top_p at boundaries 0 and 1 (#235)") {
+        let lo = try decode(
+            ChatCompletionRequest.self,
+            from: #"{"model":"\#(M)","messages":[{"role":"user","content":"hi"}],"top_p":0.0}"#
+        )
+        try assertNil(ChatRequestValidator.validate(lo))
+        let hi = try decode(
+            ChatCompletionRequest.self,
+            from: #"{"model":"\#(M)","messages":[{"role":"user","content":"hi"}],"top_p":1.0}"#
+        )
+        try assertNil(ChatRequestValidator.validate(hi))
+    }
+
+    test("validator accepts temperature at upper bound 2 (#235)") {
+        let request = try decode(
+            ChatCompletionRequest.self,
+            from: #"{"model":"\#(M)","messages":[{"role":"user","content":"hi"}],"temperature":2.0}"#
+        )
+        try assertNil(ChatRequestValidator.validate(request))
+    }
+
     test("validator accepts valid max_tokens and temperature") {
         let request = try decode(
             ChatCompletionRequest.self,

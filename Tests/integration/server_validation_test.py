@@ -64,3 +64,22 @@ def test_oversized_body_includes_cors_header_for_allowed_origin():
     assert resp.status_code == 413
     # Allowed localhost origin is echoed back (origin check is on by default).
     assert resp.headers.get("access-control-allow-origin") == LOCAL_ORIGIN, dict(resp.headers)
+
+
+# ============================================================================
+# #235 - out-of-range sampling parameters
+# ============================================================================
+
+@pytest.mark.parametrize("top_p", [2.0, -0.5])
+def test_out_of_range_top_p_returns_400(top_p):
+    payload = {"model": MODEL, "messages": [{"role": "user", "content": "hi"}], "top_p": top_p}
+    resp = _post(payload)
+    assert resp.status_code == 400, (top_p, resp.status_code, resp.text)
+    _assert_openai_error(resp, expected_type="invalid_request_error")
+
+
+def test_temperature_above_two_returns_400():
+    payload = {"model": MODEL, "messages": [{"role": "user", "content": "hi"}], "temperature": 5.0}
+    resp = _post(payload)
+    assert resp.status_code == 400, resp.text
+    _assert_openai_error(resp, expected_type="invalid_request_error")
