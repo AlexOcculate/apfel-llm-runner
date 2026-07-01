@@ -357,3 +357,35 @@ def test_219_json_schema_nullable_property_conforms():
         f"nullable-property json_schema should succeed, got {resp.status_code}: {resp.text}")
     data = json.loads(resp.json()["choices"][0]["message"]["content"])
     assert "name" in data, f"schema must constrain output to real properties, got {data}"
+
+
+# ---------------------------------------------------------------------------
+# #243 json_schema "number" must allow fractional output (was generated as Int)
+# ---------------------------------------------------------------------------
+
+def test_243_json_schema_number_allows_fractional():
+    """A json_schema {"type":"number"} property must be able to produce a
+    fractional value like 9.99. Previously the IR conflated integer+number and
+    mapped both to Int, so fractional outputs were silently unreachable (#243).
+    Model-dependent."""
+    schema = {
+        "type": "object",
+        "properties": {"price": {"type": "number"}},
+        "required": ["price"],
+        "additionalProperties": False,
+    }
+    resp = _chat({
+        "model": MODEL,
+        "messages": [{"role": "user", "content": "The item costs nine dollars and ninety-nine cents. Return its price as a number."}],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "Priced", "schema": schema, "strict": True},
+        },
+    })
+    assert resp.status_code == 200, f"number json_schema should succeed, got {resp.status_code}: {resp.text}"
+    data = json.loads(resp.json()["choices"][0]["message"]["content"])
+    assert isinstance(data["price"], float), (
+        f"a JSON Schema 'number' must permit a fractional value, got {data['price']!r} "
+        "(type mapped to Int would round to a whole number)")
+    assert data["price"] != int(data["price"]), (
+        f"expected a fractional price (e.g. 9.99), got a whole number {data['price']!r}")

@@ -22,8 +22,8 @@ func runSchemaParserTests() {
 
     test("parse integer primitive") {
         let ir = try SchemaParser.parse(json: #"{"type":"integer"}"#, name: "i")
-        guard case .number(let name, _) = ir else {
-            throw TestFailure("expected .number for integer, got \(ir)")
+        guard case .integer(let name, _) = ir else {
+            throw TestFailure("expected .integer for integer, got \(ir)")
         }
         try assertEqual(name, "i")
     }
@@ -33,6 +33,14 @@ func runSchemaParserTests() {
         guard case .number = ir else {
             throw TestFailure("expected .number, got \(ir)")
         }
+    }
+
+    test("integer and number parse to distinct IR cases (#243)") {
+        let intIR = try SchemaParser.parse(json: #"{"type":"integer"}"#, name: "x")
+        let numIR = try SchemaParser.parse(json: #"{"type":"number"}"#, name: "x")
+        try assertTrue(intIR != numIR, "integer and number must not collapse to the same IR")
+        guard case .integer = intIR else { throw TestFailure("expected .integer") }
+        guard case .number = numIR else { throw TestFailure("expected .number") }
     }
 
     test("parse boolean primitive") {
@@ -340,7 +348,7 @@ func runSchemaParserTests() {
 
     test("oneOf [X, null] unwraps to X") {
         let ir = try SchemaParser.parse(json: #"{"oneOf":[{"type":"integer"},{"type":"null"}]}"#, name: "i")
-        guard case .number = ir else { throw TestFailure("expected .number, got \(ir)") }
+        guard case .integer = ir else { throw TestFailure("expected .integer, got \(ir)") }
     }
 
     test("type array [string, null] unwraps to string") {
@@ -348,9 +356,9 @@ func runSchemaParserTests() {
         guard case .string = ir else { throw TestFailure("expected .string, got \(ir)") }
     }
 
-    test("type array [null, integer] unwraps to number") {
+    test("type array [null, integer] unwraps to integer") {
         let ir = try SchemaParser.parse(json: #"{"type":["null","integer"]}"#, name: "i")
-        guard case .number = ir else { throw TestFailure("expected .number, got \(ir)") }
+        guard case .integer = ir else { throw TestFailure("expected .integer, got \(ir)") }
     }
 
     test("nullable anyOf preserves enum on the non-null branch") {
@@ -382,7 +390,7 @@ func runSchemaParserTests() {
         let ir = try SchemaParser.parse(json: json, name: "person")
         guard case .object(_, _, let props) = ir else { throw TestFailure("expected .object") }
         try assertTrue(props[0].isOptional, "nullable type-array property must be optional")
-        guard case .number = props[0].schema else { throw TestFailure("age must unwrap to .number") }
+        guard case .integer = props[0].schema else { throw TestFailure("age must unwrap to .integer") }
     }
 
     test("anyOf of two non-null types throws unsupportedType") {

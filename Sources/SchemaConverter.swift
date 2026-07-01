@@ -160,11 +160,15 @@ enum SchemaConverter {
             // schema-guided generation (#167).
             return DynamicGenerationSchema(type: String.self)
 
-        case .number:
-            // JSON Schema integer/number. The IR conflates the two; on-device
-            // structured output uses Int (a valid JSON number) as the default
-            // scalar so fields decode as numbers, not empty objects (#167).
+        case .integer:
+            // JSON Schema `integer` -> whole numbers only.
             return DynamicGenerationSchema(type: Int.self)
+
+        case .number:
+            // JSON Schema `number` -> may be fractional; must map to Double so
+            // structured output can produce values like 9.99 (#243). Mapping it
+            // to Int made fractional outputs unreachable.
+            return DynamicGenerationSchema(type: Double.self)
 
         case .bool:
             return DynamicGenerationSchema(type: Bool.self)

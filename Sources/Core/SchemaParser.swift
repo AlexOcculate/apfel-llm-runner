@@ -70,7 +70,10 @@ public enum SchemaParser {
             let enumValues = node["enum"] as? [String]
             return .string(name: name, description: description, enumValues: enumValues)
 
-        case "integer", "number":
+        case "integer":
+            return .integer(name: name, description: description)
+
+        case "number":
             return .number(name: name, description: description)
 
         case "boolean":
