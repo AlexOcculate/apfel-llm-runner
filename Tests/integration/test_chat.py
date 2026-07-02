@@ -386,8 +386,15 @@ def test_chat_multibyte_backspace_is_character_wise():
     echo = bytes(echo)
     # The 2-byte character was echoed once when typed.
     assert b"\xc3\xa9" in echo, f"multibyte char not echoed: {echo!r}"
-    # A single backspace deleted the whole character (character-wise, not byte-wise).
-    assert echo.count(b"\x08") == 1, f"expected one backspace erase, got: {echo!r}"
+    # A single backspace erased the whole character as ONE erase operation
+    # (character-wise, not byte-wise). libedit's erase redisplay is either a lone
+    # \x08 (pre-macOS 26.3.1) or the destructive \x08 \x08 (BS, space, BS) sequence
+    # (macOS 26.3.1+, #318) - both are one erase of one character. Count erase
+    # operations, not raw \x08 bytes, so the assertion tracks the semantic property
+    # (whole-character deletion) rather than the terminal's redisplay style. The
+    # dangling-lead-byte check below is the real character-vs-byte discriminator.
+    erase_ops = re.findall(rb"\x08 \x08|\x08", echo)
+    assert len(erase_ops) == 1, f"expected one erase operation, got: {echo!r}"
     # No dangling UTF-8 lead byte after the erase (the byte-wise-deletion signature).
     after_erase = echo.rsplit(b"\x08", 1)[1]
     assert b"\xc3" not in after_erase, f"dangling lead byte after erase: {echo!r}"
