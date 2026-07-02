@@ -334,8 +334,16 @@ func detectAndExecuteMCPTools(
     for call in toolCalls {
         do {
             let result = try await mcpManager.execute(name: call.name, arguments: call.argumentsString)
-            resultParts.append("\(call.name): \(result)")
-            toolLog.append((name: call.name, args: call.argumentsString, result: result, isError: false))
+            if result.isError {
+                // An MCP-spec `isError: true` result is a tool-execution error
+                // (e.g. divide(1,0)). Feed it back to the model so it can see
+                // the error and recover, instead of aborting with HTTP 500 (#220).
+                resultParts.append("\(call.name): error - \(result.text)")
+                toolLog.append((name: call.name, args: call.argumentsString, result: result.text, isError: true))
+            } else {
+                resultParts.append("\(call.name): \(result.text)")
+                toolLog.append((name: call.name, args: call.argumentsString, result: result.text, isError: false))
+            }
         } catch {
             switch error as? MCPError {
             // Non-fatal per-call failures: feed them back as an error result so

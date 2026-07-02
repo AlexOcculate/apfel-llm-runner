@@ -364,21 +364,32 @@ def test_client_tools_not_auto_executed():
         f"Expected 'tool_calls' for client tools but got '{data['choices'][0]['finish_reason']}'"
 
 
-def test_mcp_tool_error_returns_structured_error():
-    """MCP tool failures must be surfaced honestly, not rewritten by the model."""
+def test_mcp_tool_iserror_is_fed_back_to_model_not_500():
+    """An MCP `isError: true` tool result (e.g. divide by zero) is fed back to
+    the model to recover, not aborted with HTTP 500 (#220).
+
+    Per the MCP spec, execution errors "should be reported inside the result
+    object ... so the LLM can see it and act". Previously apfel turned isError
+    into a thrown MCPError.serverError -> HTTP 500. Now the request completes
+    normally (200) with a natural-language answer; only transport/protocol
+    failures (timeout, dead pipe) still surface as 500 (covered by the timeout
+    and crashed-server tests below).
+    """
     resp = httpx.post(f"{API_URL}/chat/completions", json={
         "model": MODEL,
         "messages": [
-            {"role": "user", "content": "Use the divide tool to divide 10 by 0. Reply with just the number."}
+            {"role": "user", "content": "Use the divide tool to divide 10 by 0, then tell me what happened."}
         ],
         "seed": 42,
     }, timeout=TIMEOUT)
-    assert resp.status_code == 500
+    assert resp.status_code == 200, f"isError must no longer 500: {resp.status_code} {resp.text[:200]}"
     data = resp.json()
-    assert data["error"]["type"] == "server_error"
-    message = data["error"]["message"].lower()
-    assert "divide" in message
-    assert "division by zero" in message
+    choice = data["choices"][0]
+    assert choice["finish_reason"] == "stop"
+    content = choice["message"]["content"]
+    assert content and content.strip(), "model must produce a recovery answer, not empty content"
+    # The raw tool-call JSON must not leak to the client as the answer.
+    assert '"tool_calls"' not in content
 
 
 def test_mcp_tool_timeout_returns_structured_error():

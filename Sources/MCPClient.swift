@@ -100,7 +100,7 @@ final class MCPConnection: @unchecked Sendable {
         }
     }
 
-    func callTool(name: String, arguments: String) throws -> String {
+    func callTool(name: String, arguments: String) throws -> MCPProtocol.ToolCallResult {
         // Malformed model-emitted arguments must fail loudly instead of being
         // silently replaced with {} by the request formatter (#241).
         try MCPProtocol.validateToolArguments(name: name, arguments: arguments)
@@ -113,11 +113,11 @@ final class MCPConnection: @unchecked Sendable {
             timeoutMilliseconds: timeoutMilliseconds,
             operationDescription: "tool '\(name)'"
         )
-        let result = try MCPProtocol.parseToolCallResponse(resp)
-        if result.isError {
-            throw MCPError.serverError("Tool '\(name)' failed: \(result.text)")
-        }
-        return result.text
+        // An MCP-spec `isError: true` result is a tool-execution error, not a
+        // transport failure: it is returned (not thrown) so the caller can feed
+        // it back to the model to recover, per the MCP spec (#220). Only
+        // transport/protocol failures throw.
+        return try MCPProtocol.parseToolCallResponse(resp)
     }
 
     /// Terminate the child and reap it so it never lingers as a zombie (#216).
@@ -284,16 +284,14 @@ actor RemoteMCPConnection: Sendable {
         }
     }
 
-    func callTool(name: String, arguments: String) async throws -> String {
+    func callTool(name: String, arguments: String) async throws -> MCPProtocol.ToolCallResult {
         // Malformed model-emitted arguments must fail loudly instead of being
         // silently replaced with {} by the request formatter (#241).
         try MCPProtocol.validateToolArguments(name: name, arguments: arguments)
         let resp = try await post(MCPProtocol.toolsCallRequest(id: allocId(), name: name, arguments: arguments))
-        let result = try MCPProtocol.parseToolCallResponse(resp)
-        if result.isError {
-            throw MCPError.serverError("Tool '\(name)' failed: \(result.text)")
-        }
-        return result.text
+        // isError is a tool-execution error, returned (not thrown) so the model
+        // can see it and recover; only transport/protocol failures throw (#220).
+        return try MCPProtocol.parseToolCallResponse(resp)
     }
 
     func shutdown() async {
@@ -378,7 +376,7 @@ enum AnyMCPConnection: Sendable {
         }
     }
 
-    func callTool(name: String, arguments: String) async throws -> String {
+    func callTool(name: String, arguments: String) async throws -> MCPProtocol.ToolCallResult {
         switch self {
         case .local(let c):
             // Run blocking stdio I/O off the cooperative thread pool
@@ -462,7 +460,7 @@ actor MCPManager {
         MCPToolRegistry.deduplicate(connections.flatMap(\.tools))
     }
 
-    func execute(name: String, arguments: String) async throws -> String {
+    func execute(name: String, arguments: String) async throws -> MCPProtocol.ToolCallResult {
         guard let conn = toolMap[name] else {
             throw MCPError.toolNotFound("No MCP server provides tool '\(name)'")
         }
