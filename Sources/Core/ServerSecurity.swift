@@ -54,4 +54,43 @@ public enum ServerSecurity {
         }
         return result
     }
+
+    /// DNS-rebinding defense: is this request's `Host` header acceptable? (#230)
+    ///
+    /// Same-origin GET requests carry no Origin header, so origin checking alone
+    /// cannot stop a rebinding page (`attacker.com` re-resolved to `127.0.0.1`)
+    /// from reading `/health` and `/v1/models`. The canonical defense is a Host
+    /// allowlist: accept only loopback names (`localhost`, `127.0.0.1`, `[::1]`,
+    /// with or without a port) and the configured bind host. A missing/empty
+    /// Host is allowed - there is nothing to rebind. Callers apply this only when
+    /// bound to a loopback host; a deliberately network-exposed bind (`0.0.0.0`)
+    /// receives Host headers we cannot enumerate and is the operator's choice.
+    public static func isAllowedHostHeader(_ hostHeader: String?, bindHost: String) -> Bool {
+        guard let hostHeader, !hostHeader.isEmpty else { return true }
+        let name = hostWithoutPort(hostHeader).lowercased()
+        let allowed: Set<String> = ["localhost", "127.0.0.1", "::1", "[::1]", bindHost.lowercased()]
+        return allowed.contains(name)
+    }
+
+    // MARK: - Private
+
+    /// Strip an optional `:port` suffix, keeping bracketed IPv6 literals intact.
+    private static func hostWithoutPort(_ s: String) -> String {
+        if s.hasPrefix("[") {
+            // "[::1]" or "[::1]:8080" -> "[::1]"
+            if let close = s.firstIndex(of: "]") {
+                return String(s[...close])
+            }
+            return s
+        }
+        // "host:port" -> "host", but only when the suffix is a numeric port
+        // (a bare unbracketed IPv6 like "::1" has no numeric-only tail).
+        if let colon = s.lastIndex(of: ":") {
+            let portPart = s[s.index(after: colon)...]
+            if !portPart.isEmpty && portPart.allSatisfy(\.isNumber) {
+                return String(s[..<colon])
+            }
+        }
+        return s
+    }
 }

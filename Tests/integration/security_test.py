@@ -111,6 +111,55 @@ def ensure_default_server():
         yield
 
 
+# MARK: - Host header validation (DNS-rebinding defense, #230)
+
+def test_foreign_host_header_rejected():
+    """A foreign Host header (rebinding attacker domain) is rejected (#230)."""
+    resp = httpx.get(
+        f"{BASE_URL}/v1/models",
+        headers={"Host": "attacker.com"},
+        timeout=10,
+    )
+    assert resp.status_code == 403
+    assert "Host" in resp.json()["error"]["message"]
+
+
+def test_foreign_host_header_rejected_on_health():
+    """Rebinding must not reach /health either (#230)."""
+    resp = httpx.get(
+        f"{BASE_URL}/health",
+        headers={"Host": "attacker.com"},
+        timeout=10,
+    )
+    assert resp.status_code == 403
+
+
+def test_localhost_host_header_allowed():
+    """The normal localhost Host header (with port) is accepted (#230)."""
+    resp = httpx.get(
+        f"{BASE_URL}/v1/models",
+        headers={"Host": "localhost:11434"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+
+
+def test_127_host_header_allowed():
+    """127.0.0.1 Host header is accepted (#230)."""
+    resp = httpx.get(
+        f"{BASE_URL}/v1/models",
+        headers={"Host": "127.0.0.1:11434"},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+
+
+def test_default_host_header_allowed():
+    """The default (httpx-set) Host header must pass - standing suite stays green."""
+    resp = httpx.get(f"{BASE_URL}/v1/models", timeout=10)
+    assert resp.status_code == 200
+
+
 # MARK: - Origin Check (default: localhost only)
 
 def test_no_origin_header_allowed():

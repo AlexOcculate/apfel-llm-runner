@@ -111,4 +111,43 @@ func runServerSecurityTests() {
         try assertNotNil(scrubbed["PATH"])
         try assertTrue(scrubbed["PATH"]!.contains("/usr/bin"))
     }
+
+    // MARK: - isAllowedHostHeader (#230 DNS-rebinding defense)
+
+    test("host header: nil/empty Host is allowed (nothing to rebind)") {
+        try assertTrue(ServerSecurity.isAllowedHostHeader(nil, bindHost: "127.0.0.1"))
+        try assertTrue(ServerSecurity.isAllowedHostHeader("", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: localhost allowed with and without port") {
+        try assertTrue(ServerSecurity.isAllowedHostHeader("localhost", bindHost: "127.0.0.1"))
+        try assertTrue(ServerSecurity.isAllowedHostHeader("localhost:11434", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: 127.0.0.1 allowed with and without port") {
+        try assertTrue(ServerSecurity.isAllowedHostHeader("127.0.0.1", bindHost: "127.0.0.1"))
+        try assertTrue(ServerSecurity.isAllowedHostHeader("127.0.0.1:8080", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: [::1] IPv6 loopback allowed with and without port") {
+        try assertTrue(ServerSecurity.isAllowedHostHeader("[::1]", bindHost: "127.0.0.1"))
+        try assertTrue(ServerSecurity.isAllowedHostHeader("[::1]:11434", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: case-insensitive") {
+        try assertTrue(ServerSecurity.isAllowedHostHeader("LocalHost:3000", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: foreign host rejected (rebinding attacker domain)") {
+        try assertTrue(!ServerSecurity.isAllowedHostHeader("attacker.com", bindHost: "127.0.0.1"))
+        try assertTrue(!ServerSecurity.isAllowedHostHeader("attacker.com:11434", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: subdomain of localhost rejected") {
+        try assertTrue(!ServerSecurity.isAllowedHostHeader("localhost.evil.com", bindHost: "127.0.0.1"))
+    }
+
+    test("host header: the configured bind host is allowed") {
+        try assertTrue(ServerSecurity.isAllowedHostHeader("myhost.local:11434", bindHost: "myhost.local"))
+    }
 }
