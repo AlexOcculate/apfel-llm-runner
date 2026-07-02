@@ -7,6 +7,8 @@ and this project adheres to [https://semver.org/](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-02
+
 ### Added
 
 - On-device file extraction for `-f`/`--file` (and piped files) via the public [lesbar](https://github.com/Arthur-Ficial/lesbar) package: `apfel -f report.pdf "summarize"` now reads PDFs (PDFKit text, Vision OCR fallback for scans) and images (Vision OCR text plus a short scene description) entirely on device, no network. Many image formats are supported (PNG, JPEG, HEIC, TIFF, GIF, BMP, WebP and more) alongside plain text and PDF. Piped files (`cat report.pdf | apfel "summarize"`) route through the same extractor with format sniffing. Documented in [docs/file-extraction.md](docs/file-extraction.md) (#211).
