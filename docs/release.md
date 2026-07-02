@@ -72,9 +72,10 @@ This runs locally via `scripts/publish-release.sh` (not on GitHub Actions - GitH
 4. Runs all unit tests via `swift run apfel-tests`
 5. Runs all integration tests discovered under `Tests/integration/` with real Apple Intelligence
 6. Commits `.version`, `README.md`, `Sources/BuildInfo.swift`, tags, and pushes to main
-7. Packages `apfel-<version>-arm64-macos.tar.gz`
-8. Publishes GitHub Release with changelog and tarball
-9. Updates the Homebrew tap formula (`Arthur-Ficial/homebrew-tap`)
+7. Signs the binary with the Developer ID identity (hardened runtime) and packages `apfel-<version>-arm64-macos.tar.gz`
+8. Verifies the Developer ID signature and notarizes the binary with Apple (hard gate - the release aborts if signing or notarization fails)
+9. Publishes the GitHub Release with changelog, the tarball, and an `apfel-<version>-arm64-macos.tar.gz.sha256` checksum asset
+10. Updates the Homebrew tap formula (`Arthur-Ficial/homebrew-tap`)
 
 Total time: ~5 minutes.
 
@@ -84,7 +85,7 @@ Total time: ~5 minutes.
 ./scripts/post-release-verify.sh
 ```
 
-Verifies: GitHub Release exists with tarball, git tag exists, .version matches, installed binary matches.
+Verifies: GitHub Release exists with tarball, git tag exists, .version matches, installed binary matches, the published `.sha256` asset and Homebrew tap formula agree on the tarball digest, and the shipped binary carries the Developer ID TeamIdentifier (7D2YX5DQ6M).
 
 ## Homebrew-core distribution
 
@@ -110,7 +111,7 @@ GitHub CI **cannot** run the full integration suite because GitHub-hosted `macos
 
 ## Distribution channels
 
-Each release is published through three channels. All three pull the same signed tarball from the GitHub Release; nothing is rebuilt per-channel.
+Each release is published through three channels. All three pull the same tarball from the GitHub Release; nothing is rebuilt per-channel. The `apfel` binary inside is Developer ID signed under a hardened runtime and the submission is notarized by Apple (it is not stapled - a bare CLI binary in a tarball cannot carry a stapled ticket, so Gatekeeper verifies notarization online). A second asset, `apfel-<version>-arm64-macos.tar.gz.sha256`, publishes the checksum independently of the Homebrew formula; `scripts/post-release-verify.sh` cross-checks the tarball digest against both and confirms the Developer ID TeamIdentifier.
 
 | Channel | How fresh | Mechanism |
 |---------|-----------|-----------|

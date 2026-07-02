@@ -107,13 +107,66 @@ git tag -a "v$version" -m "v$version"
 git push origin HEAD:main
 git push origin "v$version"
 
+# --- Sign the binary (#226) ---
+# Sign with the Developer ID identity under a hardened runtime BEFORE packaging
+# so the tarred binary is the signed one. Signing lives here (not in
+# package-release-asset) so plain `make build`/dev packaging never touches the
+# keychain. On the release path signing is mandatory - a real release must not
+# ship an ad-hoc binary.
+step "Sign release binary"
+security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application: Franz Enzenhofer (7D2YX5DQ6M)" \
+    || fail "no 'Developer ID Application: Franz Enzenhofer (7D2YX5DQ6M)' signing identity found - cannot publish a signed release (#226)"
+codesign --force --timestamp --options runtime \
+    --sign "Developer ID Application: Franz Enzenhofer (7D2YX5DQ6M)" \
+    ".build/release/apfel" \
+    || fail "codesign failed - refusing to publish (#226)"
+codesign --verify --strict ".build/release/apfel" || fail "codesign verification failed (#226)"
+
 # --- Package + publish GitHub Release ---
 step "Publish GitHub Release"
 
 asset=$(make package-release-asset | tail -1)
-sha256=$(shasum -a 256 "$asset" | awk '{print $1}')
+
+# --- Notarization hard gate (#226) ---
+# Refuse to publish an ad-hoc-signed binary, and notarize the signed binary so
+# Gatekeeper accepts non-brew downloads. A bare CLI binary cannot be stapled
+# (stapler needs a bundle/dmg/pkg), so we notarize the submission and ship
+# without a stapled ticket - Gatekeeper verifies notarization online.
+sig=$(codesign -dvv ".build/release/apfel" 2>&1 || true)
+echo "$sig" | grep -q "TeamIdentifier=7D2YX5DQ6M" || \
+    fail "release binary is not Developer ID signed (need TeamIdentifier 7D2YX5DQ6M) - refusing to publish an ad-hoc release (#226)"
+echo "$sig" | grep -q "flags=.*runtime" || \
+    fail "release binary is not signed with the hardened runtime - notarization will reject it (#226)"
+
+notarize_dir=$(mktemp -d)
+mkdir -p "$notarize_dir/payload"
+cp ".build/release/apfel" "$notarize_dir/payload/apfel"
+COPYFILE_DISABLE=1 ditto -c -k "$notarize_dir/payload" "$notarize_dir/apfel-notarize.zip"
+# Credentials: prefer explicit App Store Connect creds (works non-interactively,
+# e.g. when the notarytool keychain profile lives in a locked keychain), else
+# fall back to the documented "notarytool" keychain profile (see
+# ~/dev/apple-dev-id/README.md). team-id defaults to Franz's team.
+if [ -n "${APFEL_NOTARY_APPLE_ID:-}" ] && [ -n "${APFEL_NOTARY_PASSWORD:-}" ]; then
+    xcrun notarytool submit "$notarize_dir/apfel-notarize.zip" \
+        --apple-id "$APFEL_NOTARY_APPLE_ID" \
+        --team-id "${APFEL_NOTARY_TEAM_ID:-7D2YX5DQ6M}" \
+        --password "$APFEL_NOTARY_PASSWORD" --wait \
+        || { rm -rf "$notarize_dir"; fail "notarization failed - refusing to publish (#226)."; }
+else
+    NOTARY_PROFILE="${APFEL_NOTARY_PROFILE:-notarytool}"
+    xcrun notarytool submit "$notarize_dir/apfel-notarize.zip" \
+        --keychain-profile "$NOTARY_PROFILE" --wait \
+        || { rm -rf "$notarize_dir"; fail "notarization failed - refusing to publish (#226). Ensure the '$NOTARY_PROFILE' keychain profile exists (xcrun notarytool store-credentials) and its keychain is unlocked, or set APFEL_NOTARY_APPLE_ID / APFEL_NOTARY_PASSWORD."; }
+fi
+rm -rf "$notarize_dir"
+
+# Checksum sidecar, published as a second release asset so a swapped tarball is
+# detectable independently of the Homebrew formula (#226).
+shasum -a 256 "$asset" > "$asset.sha256"
+sha256=$(awk '{print $1}' "$asset.sha256")
 echo "Asset: $asset"
 echo "SHA256: $sha256"
+echo "Checksum asset: $asset.sha256"
 
 prev_tag=$(git tag --sort=-v:refname | grep -Fxv "v$version" | head -1)
 notes="## What's Changed"$'\n\n'
@@ -125,9 +178,9 @@ notes+="Install: \`brew install apfel\`"$'\n'
 notes+="Upgrade: \`brew upgrade apfel\`"
 
 if gh release view "v$version" --repo Arthur-Ficial/apfel >/dev/null 2>&1; then
-    gh release upload "v$version" "$asset" --clobber --repo Arthur-Ficial/apfel
+    gh release upload "v$version" "$asset" "$asset.sha256" --clobber --repo Arthur-Ficial/apfel
 else
-    gh release create "v$version" "$asset" \
+    gh release create "v$version" "$asset" "$asset.sha256" \
         --title "v$version" \
         --notes "$notes" \
         --repo Arthur-Ficial/apfel

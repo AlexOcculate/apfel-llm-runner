@@ -325,7 +325,7 @@ Verifies: GitHub Release exists with tarball, git tag exists, `.version` matches
 
 ### Distribution channels
 
-apfel ships through three channels. All pull the same signed tarball from each GitHub Release.
+apfel ships through three channels. All pull the same tarball from each GitHub Release. The tarball's `apfel` binary is Developer ID signed (Franz Enzenhofer, team 7D2YX5DQ6M) under a hardened runtime and the submission is notarized by Apple. It is NOT stapled - a bare CLI binary in a tarball cannot hold a stapled ticket (stapler needs a bundle/dmg/pkg), so Gatekeeper verifies notarization online. Each release also publishes an `apfel-<v>-arm64-macos.tar.gz.sha256` checksum asset; `scripts/post-release-verify.sh` cross-checks it against the tarball and the tap formula sha256 and confirms the TeamIdentifier.
 
 - **homebrew-core** - `brew install apfel`. Autobump detects new releases; latency ~24h. We do not maintain the formula.
 - **Arthur-Ficial/homebrew-tap** - `brew install Arthur-Ficial/tap/apfel`. Synchronous, pushed as part of `make release`. Secondary channel; also houses apfel-family tools (apfel-chat, apfel-clip, apfel-mcp, etc.).
