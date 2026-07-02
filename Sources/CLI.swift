@@ -687,6 +687,7 @@ func printUsage(to handle: FileHandle = .standardOutput) {
       4  Context overflow (input too long)
       5  Model unavailable (Apple Intelligence not enabled)
       6  Rate limited / busy
+      130  Interrupted (Ctrl-C at the chat prompt)
 
     \(styled("EXAMPLES:", .yellow, .bold))
       \(appName) "What is the capital of Austria?"

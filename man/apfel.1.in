@@ -376,6 +376,10 @@ model is not downloaded.
 Rate limited or busy. Exceeded
 .BR \-\-max-concurrent ,
 or a concurrent session lock is held.
+.TP
+.B 130
+Interrupted. The user pressed Ctrl-C (SIGINT) at the interactive chat
+prompt. The terminal is restored to its normal mode before exit.
 .SH FILES
 .TP
 .I /usr/local/bin/apfel

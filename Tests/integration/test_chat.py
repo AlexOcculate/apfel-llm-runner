@@ -333,6 +333,56 @@ def _run_chat_until_natural_exit(args, first_input, env=None, timeout=120):
     return os.waitstatus_to_exitcode(status), out.decode("utf-8", errors="replace")
 
 
+def test_chat_ctrl_c_exits_130():
+    """#251: Ctrl-C at the chat prompt exits 130 (interrupted).
+
+    Uses pty.fork so the child has a controlling terminal and the \\x03 byte is
+    turned into SIGINT by the tty line discipline (ISIG stays on during libedit
+    line editing). The handler restores the terminal and _exit(130)s.
+    """
+    require_model()
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="This process .* use of forkpty\\(\\) may lead to deadlocks in the child\\.",
+            category=DeprecationWarning,
+        )
+        pid, fd = pty.fork()
+    if pid == 0:
+        os.execve(str(BINARY), [str(BINARY), "--chat"], _clean_env())
+    out = bytearray()
+    deadline = time.time() + 90
+    while time.time() < deadline and b"you" not in out:
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if fd in ready:
+            try:
+                out.extend(os.read(fd, 4096))
+            except OSError:
+                break
+    assert b"you" in out, "chat prompt never appeared"
+    time.sleep(0.4)
+    os.write(fd, b"\x03")  # Ctrl-C
+    status = None
+    d2 = time.time() + 15
+    while time.time() < d2:
+        wp, st = os.waitpid(pid, os.WNOHANG)
+        if wp == pid:
+            status = st
+            break
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if fd in ready:
+            try:
+                os.read(fd, 4096)
+            except OSError:
+                pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    assert status is not None, "process did not exit after Ctrl-C"
+    assert os.waitstatus_to_exitcode(status) == 130
+
+
 def test_chat_context_rotation_failure_exits_nonzero():
     """#252: a context-rotation failure mid-session must exit nonzero.
 
