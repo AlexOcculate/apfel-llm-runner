@@ -419,6 +419,59 @@ def test_redirected_stderr_has_no_ansi_when_stdout_is_tty():
     assert b"\x1b" not in err, err
 
 
+def test_empty_stdin_usage_error_keeps_stdout_empty():
+    """#250: usage-error exit (2) must not write usage to stdout."""
+    result = run_cli([], input_text="")
+    assert result.returncode == 2
+    assert result.stdout == "", f"stdout should be empty on usage error, got: {result.stdout!r}"
+
+
+def _run_no_args_tty_stdin(timeout=15):
+    """No args with stdin on a pty (interactive TTY), stdout/stderr on pipes.
+
+    Reproduces launching `apfel` with nothing to do at a terminal. Returns
+    (returncode, stdout_bytes, stderr_bytes).
+    """
+    merged_env = os.environ.copy()
+    for key in ["NO_COLOR", "APFEL_SYSTEM_PROMPT", "APFEL_HOST",
+                "APFEL_PORT", "APFEL_TEMPERATURE", "APFEL_MAX_TOKENS"]:
+        merged_env.pop(key, None)
+    stdin_master, stdin_slave = pty.openpty()
+    out_r, out_w = os.pipe()
+    err_r, err_w = os.pipe()
+    proc = subprocess.Popen(
+        [str(BINARY)],
+        stdin=stdin_slave, stdout=out_w, stderr=err_w,
+        env=merged_env, close_fds=True,
+    )
+    os.close(stdin_slave)
+    os.close(out_w)
+    os.close(err_w)
+    out = b"".join(iter(lambda: os.read(out_r, 4096), b""))
+    err = b"".join(iter(lambda: os.read(err_r, 4096), b""))
+    os.close(out_r)
+    os.close(err_r)
+    os.close(stdin_master)
+    proc.wait(timeout=timeout)
+    return proc.returncode, out, err
+
+
+def test_no_args_tty_usage_goes_to_stderr():
+    """#250: no-args at a terminal prints usage to stderr, not stdout, exit 2."""
+    returncode, out, err = _run_no_args_tty_stdin()
+    assert returncode == 2
+    assert out == b"", f"stdout should be empty, got {out[:80]!r}"
+    assert b"USAGE:" in err, err[:120]
+
+
+def test_help_usage_goes_to_stdout():
+    """#250: --help keeps usage on stdout and exits 0."""
+    result = run_cli(["--help"])
+    assert result.returncode == 0
+    assert "USAGE:" in result.stdout
+    assert result.stderr == "", f"--help should not write to stderr, got: {result.stderr!r}"
+
+
 def test_quiet_json_prompt_output_is_machine_readable():
     require_model()
     result = run_cli(

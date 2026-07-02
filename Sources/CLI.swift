@@ -571,9 +571,22 @@ private func shellPassthrough(_ executable: String, args: [String]) -> Int32 {
 
 // MARK: - Usage
 
-/// Print the help text. Styled with ANSI colors when on a TTY.
-func printUsage() {
-    print("""
+/// Print the help/usage text to the given destination.
+///
+/// `--help`/`.help` prints to stdout and exits 0. Usage-error paths (exit 2)
+/// print to stderr so stdout stays empty for downstream pipes (#250). ANSI
+/// color is gated on the destination's own TTY-ness so a redirected error
+/// stream stays escape-free (see styledErr, #249).
+func printUsage(to handle: FileHandle = .standardOutput) {
+    let toStderr = handle === FileHandle.standardError
+    let colorize = ColorPolicy.shouldColorize(
+        isTTY: isatty(toStderr ? STDERR_FILENO : STDOUT_FILENO) != 0,
+        noColorEnv: noColorEnv,
+        noColorFlag: noColorFlag)
+    func styled(_ text: String, _ colors: ANSIColor...) -> String {
+        applyStyle(text, colorize: colorize, colors)
+    }
+    let text = """
     \(styled(appName, .cyan, .bold)) v\(version) — Apple Intelligence from the command line
 
     \(styled("USAGE:", .yellow, .bold))
@@ -678,5 +691,6 @@ func printUsage() {
       \(appName) --count-tokens -o json "hello" | jq .
       APFEL_SYSTEM_PROMPT="Be brief" \(appName) "Explain TCP"
       \(appName) --serve --port 3000 --host 0.0.0.0 --cors
-    """)
+    """
+    handle.write(Data((text + "\n").utf8))
 }

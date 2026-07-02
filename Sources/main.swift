@@ -84,7 +84,7 @@ let rawArgs = Array(CommandLine.arguments.dropFirst())
 // APFEL_* env var and skipped the model-availability gate (#222). It now flows
 // through the normal parse()/dispatch path below.
 if rawArgs.isEmpty && isatty(STDIN_FILENO) != 0 {
-    printUsage()
+    printUsage(to: stderr)
     exit(exitUsageError)
 }
 

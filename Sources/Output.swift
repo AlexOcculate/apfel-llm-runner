@@ -39,7 +39,7 @@ enum ANSIColor: String, Sendable {
 }
 
 /// Wrap `text` in ANSI codes when `colorize` is true; otherwise return it plain.
-private func applyStyle(_ text: String, colorize: Bool, _ colors: [ANSIColor]) -> String {
+func applyStyle(_ text: String, colorize: Bool, _ colors: [ANSIColor]) -> String {
     guard colorize else { return text }
     let prefix = colors.map(\.rawValue).joined()
     return "\(prefix)\(text)\(ANSIColor.reset.rawValue)"
