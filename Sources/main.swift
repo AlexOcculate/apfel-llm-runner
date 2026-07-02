@@ -78,35 +78,19 @@ func stdinPromptText(_ data: Data) throws -> String {
 
 let rawArgs = Array(CommandLine.arguments.dropFirst())
 
-// No-args + stdin-pipe fast path: `echo "prompt" | apfel` with no flags.
-// Must stay above the parse() call because it needs isatty + await singlePrompt
-// before any parsing happens.
-if rawArgs.isEmpty {
-    if isatty(STDIN_FILENO) == 0 {
-        let input: String
-        do {
-            input = try stdinPromptText(readStdinData())
-        } catch let error as CLIParseError {
-            printError(error.message)
-            exit(exitUsageError)
-        }
-        if !input.isEmpty {
-            do {
-                try await singlePrompt(input, systemPrompt: nil, stream: true)
-                exit(exitSuccess)
-            } catch {
-                let classified = ApfelError.classify(error)
-                printError("\(classified.cliLabel) \(classified.openAIMessage)")
-                exit(exitCode(for: classified))
-            }
-        }
-        if stdinIsPipe() {
-            printStderr("\(styled("apfel:", .yellow)) piped input was empty - if the command prints to stderr, try: command 2>&1 | apfel")
-        }
-    }
+// No args AND stdin is a TTY: nothing to read, nothing to do -> usage + exit 2.
+// This is the only no-args special case. The bare-pipe case (`echo hi | apfel`)
+// used to be a fast path that ran BEFORE parse() and therefore dropped every
+// APFEL_* env var and skipped the model-availability gate (#222). It now flows
+// through the normal parse()/dispatch path below.
+if rawArgs.isEmpty && isatty(STDIN_FILENO) != 0 {
     printUsage()
     exit(exitUsageError)
 }
+
+// True for the bare-pipe invocation (`echo hi | apfel` with no flags). It
+// streams by default to preserve the historical output behavior of that path.
+let noArgsPipe = rawArgs.isEmpty
 
 // Pure, testable parsing. Errors land here as CLIParseError.
 let parsed: CLIArguments
@@ -174,7 +158,10 @@ if parsed.mode.acceptsStdinInput && isatty(STDIN_FILENO) == 0 {
         } else {
             fileContents.append(stdinContent)
         }
-    } else if !prompt.isEmpty && !quietMode && stdinIsPipe() {
+    } else if !quietMode && stdinIsPipe() {
+        // Empty pipe: hint about stderr redirection. Fires whether or not a
+        // prompt was given, so the bare-pipe case (`somecmd | apfel`, no args)
+        // still gets the hint now that it flows through this path (#152, #222).
         printStderr("\(styled("apfel:", .yellow)) piped input was empty - if the command prints to stderr, try: command 2>&1 | apfel")
     }
 }
@@ -226,6 +213,15 @@ let serverAllowedOrigins: [String] = {
     }
     return origins
 }()
+
+// Reject empty-prompt single/stream invocations BEFORE the model-availability
+// gate, so "nothing to do" is a usage error (exit 2) regardless of whether the
+// model is available. This preserves the old bare-pipe behavior: an empty pipe
+// with no args prints the hint above and exits 2 without touching the model.
+if (parsed.mode == .single || parsed.mode == .stream) && prompt.isEmpty {
+    printError("no prompt provided")
+    exit(exitUsageError)
+}
 
 // Check model availability for modes that need it. If unavailable, surface
 // the specific reason (appleIntelligenceNotEnabled / deviceNotEligible /
@@ -317,7 +313,9 @@ do {
             await shutdownMCP()
             exit(exitUsageError)
         }
-        try await singlePrompt(prompt, systemPrompt: parsed.systemPrompt, stream: false, options: sessionOpts, mcpManager: mcpManager)
+        // The bare-pipe case (`echo hi | apfel`) streams to preserve its
+        // historical output behavior; an explicit prompt does not (#222).
+        try await singlePrompt(prompt, systemPrompt: parsed.systemPrompt, stream: noArgsPipe, options: sessionOpts, mcpManager: mcpManager)
 
     case .countTokens:
         guard !prompt.isEmpty || parsed.systemPrompt != nil else {
