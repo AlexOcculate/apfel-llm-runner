@@ -112,6 +112,7 @@ suite("ApfelErrorMessageTests") { runApfelErrorMessageTests() }
 suite("OpenAIWireFormatTests") { runOpenAIWireFormatTests() }
 suite("ApfelCorePublicAPIUsageTests") { runApfelCorePublicAPIUsageTests() }
 suite("InstallMethodTests") { runInstallMethodTests() }
+suite("ColorPolicyTests") { runColorPolicyTests() }
 suite("SamplingDecisionTests") { runSamplingDecisionTests() }
 suite("DemoInstallerTests") { runDemoInstallerTests() }
 suite("FileFramingTests") { runFileFramingTests() }
