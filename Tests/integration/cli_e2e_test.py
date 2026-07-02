@@ -499,18 +499,42 @@ def test_piped_stdin_json_output_is_machine_readable():
     assert result.stderr == ""
 
 
-def test_json_output_no_trailing_newline():
-    """Regression: --json piped output must not end with a newline (GH-9)."""
+def test_json_output_trailing_newline():
+    """--json piped output ends with exactly one trailing newline (#259).
+
+    Reverses the earlier GH-9 no-trailing-newline decision: a single final
+    newline makes `read`-loop and `wc -l` consumption of JSON output work
+    without an awkward last byte of `}`. Exactly one newline, never two.
+    """
     require_model()
     result = run_cli(
         ["-q", "-o", "json", "What is 2+2? Reply with just the number."],
         timeout=90,
     )
     assert result.returncode == 0
-    assert not result.stdout.endswith("\n"), (
-        f"JSON stdout ends with trailing newline: {result.stdout!r}"
+    assert result.stdout.endswith("}\n"), (
+        f"JSON stdout should end with '}}\\n': {result.stdout!r}"
+    )
+    assert not result.stdout.endswith("}\n\n"), (
+        f"JSON stdout has a double trailing newline: {result.stdout!r}"
     )
     # Ensure the output is still valid JSON
+    json.loads(result.stdout)
+
+
+def test_count_tokens_json_trailing_newline():
+    """--count-tokens -o json output ends with a single trailing newline (#259).
+
+    Model-free: --count-tokens never calls the model, so this runs everywhere.
+    """
+    result = run_cli(["--count-tokens", "-o", "json", "hello"], timeout=30)
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert result.stdout.endswith("}\n"), (
+        f"count-tokens JSON should end with '}}\\n': {result.stdout!r}"
+    )
+    assert not result.stdout.endswith("}\n\n"), (
+        f"count-tokens JSON has a double trailing newline: {result.stdout!r}"
+    )
     json.loads(result.stdout)
 
 

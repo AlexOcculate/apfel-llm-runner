@@ -67,7 +67,7 @@ func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options
         let obj = ApfelResponse(
             model: modelName, content: result.content,
             metadata: .init(onDevice: true, version: version))
-        print(jsonString(obj), terminator: "")
+        print(jsonString(obj))
     }
 
     if result.finishReason == .length {
@@ -190,7 +190,7 @@ func countTokens(
             }
         }
     case .json:
-        print(jsonString(TokenBudgetJSONResponse(report: report), pretty: false), terminator: "")
+        print(jsonString(TokenBudgetJSONResponse(report: report), pretty: false))
         fflush(stdout)
     }
 

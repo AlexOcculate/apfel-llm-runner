@@ -39,7 +39,7 @@ func runBenchmarks() async throws {
     let report = try await benchmarkReport()
     switch outputFormat {
     case .json:
-        print(jsonString(report, pretty: false), terminator: "")
+        print(jsonString(report, pretty: false))
     case .plain:
         print("""
         \(styled("apfel", .cyan, .bold)) v\(report.version) — benchmark report
