@@ -168,6 +168,7 @@ def _sse_chunks(text):
         yield json.loads(payload)
 
 
+@pytest.mark.model
 def test_include_usage_emits_usage_null_on_non_final_chunks():
     payload = {
         "model": MODEL,
@@ -192,6 +193,7 @@ def test_include_usage_emits_usage_null_on_non_final_chunks():
         assert c["usage"] is None, f"non-final chunk usage not null: {c}"
 
 
+@pytest.mark.model
 def test_without_include_usage_no_usage_key_on_chunks():
     payload = {
         "model": MODEL,

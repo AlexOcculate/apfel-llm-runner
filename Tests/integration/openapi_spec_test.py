@@ -268,6 +268,7 @@ def test_server_running():
 # Tests — Non-streaming chat completion
 # ============================================================================
 
+@pytest.mark.model
 def test_chat_completion_schema():
     """Non-streaming response matches OpenAI ChatCompletion schema."""
     status, data = chat([{"role": "user", "content": "Say hi."}])
@@ -275,18 +276,21 @@ def test_chat_completion_schema():
     validate(instance=data, schema=CHAT_COMPLETION_SCHEMA)
 
 
+@pytest.mark.model
 def test_chat_completion_id_format():
     """Response id starts with 'chatcmpl-'."""
     _, data = chat([{"role": "user", "content": "Say ok."}])
     assert data["id"].startswith("chatcmpl-")
 
 
+@pytest.mark.model
 def test_chat_completion_object_field():
     """object field is exactly 'chat.completion'."""
     _, data = chat([{"role": "user", "content": "Say yes."}])
     assert data["object"] == "chat.completion"
 
 
+@pytest.mark.model
 def test_chat_completion_usage_sums():
     """total_tokens == prompt_tokens + completion_tokens."""
     _, data = chat([{"role": "user", "content": "Count to 3."}])
@@ -294,6 +298,7 @@ def test_chat_completion_usage_sums():
     assert u["total_tokens"] == u["prompt_tokens"] + u["completion_tokens"]
 
 
+@pytest.mark.model
 def test_chat_completion_finish_reason_stop():
     """Normal completion finishes with 'stop'."""
     _, data = chat([{"role": "user", "content": "Say hello."}])
@@ -304,6 +309,7 @@ def test_chat_completion_finish_reason_stop():
 # Tests — Streaming chat completion
 # ============================================================================
 
+@pytest.mark.model
 def test_streaming_chunks_schema():
     """Every streaming chunk matches the ChatCompletionChunk schema."""
     chunks = chat_stream([{"role": "user", "content": "Say hi."}])
@@ -312,6 +318,7 @@ def test_streaming_chunks_schema():
         validate(instance=chunk, schema=CHAT_COMPLETION_CHUNK_SCHEMA)
 
 
+@pytest.mark.model
 def test_streaming_first_chunk_has_role():
     """First chunk's delta should contain the role."""
     chunks = chat_stream([{"role": "user", "content": "Hello."}])
@@ -319,6 +326,7 @@ def test_streaming_first_chunk_has_role():
     assert first_with_choices["choices"][0]["delta"].get("role") == "assistant"
 
 
+@pytest.mark.model
 def test_streaming_last_chunk_finish_reason():
     """Last chunk with choices should have finish_reason='stop'."""
     chunks = chat_stream([{"role": "user", "content": "Reply with the single word OK."}])
@@ -330,6 +338,7 @@ def test_streaming_last_chunk_finish_reason():
     assert terminal_chunks[-1]["choices"][0]["finish_reason"] == "stop"
 
 
+@pytest.mark.model
 def test_streaming_object_field():
     """Streaming chunks with choices have object='chat.completion.chunk'."""
     chunks = chat_stream([{"role": "user", "content": "Ok."}])
@@ -338,6 +347,7 @@ def test_streaming_object_field():
             assert chunk["object"] == "chat.completion.chunk"
 
 
+@pytest.mark.model
 def test_streaming_usage_chunk_keeps_openai_chunk_envelope():
     """Final usage chunk (opt-in via stream_options.include_usage) must still
     include standard chunk metadata for strict clients. Per #100, the chunk is
@@ -358,6 +368,7 @@ def test_streaming_usage_chunk_keeps_openai_chunk_envelope():
     assert usage["total_tokens"] == usage["prompt_tokens"] + usage["completion_tokens"]
 
 
+@pytest.mark.model
 def test_streaming_omits_usage_chunk_without_opt_in():
     """Per OpenAI spec, the empty-choices usage chunk must only be emitted when
     stream_options.include_usage=true. See #100."""
@@ -370,6 +381,7 @@ def test_streaming_omits_usage_chunk_without_opt_in():
         f"usage field present on stream chunk without opt-in: {usage_chunks!r}"
 
 
+@pytest.mark.model
 def test_streaming_tool_call_chunks_include_indexed_deltas():
     """Streaming tool-call deltas must include per-call indexes for strict clients."""
     tools = [{
@@ -415,6 +427,7 @@ def test_streaming_tool_call_chunks_include_indexed_deltas():
 # Tests — Tool calling schema
 # ============================================================================
 
+@pytest.mark.model
 def test_tool_call_response_schema():
     """Tool call response matches schema with finish_reason='tool_calls'."""
     tools = [{
@@ -524,6 +537,7 @@ def test_error_unsupported_frequency_penalty_schema():
     assert_invalid_request(status, data, "'frequency_penalty'")
 
 
+@pytest.mark.model
 def test_n_one_is_accepted():
     """n=1 is accepted as the only supported value."""
     status, data = chat([{"role": "user", "content": "Say hi."}], n=1)
@@ -531,6 +545,7 @@ def test_n_one_is_accepted():
     validate(instance=data, schema=CHAT_COMPLETION_SCHEMA)
 
 
+@pytest.mark.model
 def test_logprobs_false_is_accepted():
     """logprobs=false is accepted as a no-op."""
     status, data = chat([{"role": "user", "content": "Say hi."}], logprobs=False)
