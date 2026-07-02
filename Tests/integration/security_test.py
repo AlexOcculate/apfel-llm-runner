@@ -328,6 +328,30 @@ def test_token_auto_prints_generated_secret():
     assert re.search(r"token: [0-9A-Fa-f-]{36}", banner)
 
 
+def test_no_origin_check_shows_loud_warning_without_cors():
+    """--no-origin-check alone must fire the loud multi-line warning (#232)."""
+    with running_server("--no-origin-check") as (_, log_path):
+        banner = read_log(log_path)
+    assert "WARNING" in banner
+    assert "Any website can access this server" in banner
+
+
+def test_footgun_still_shows_loud_warning():
+    """--footgun (no origin check + CORS) keeps the loud warning (#232 regression)."""
+    with running_server("--footgun") as (_, log_path):
+        banner = read_log(log_path)
+    assert "WARNING" in banner
+    assert "footgun" in banner
+    assert "Any website can access this server" in banner
+
+
+def test_default_server_has_no_origin_warning():
+    """Default (origin check on) must NOT print the loud warning (#232)."""
+    with running_server() as (_, log_path):
+        banner = read_log(log_path)
+    assert "Any website can access this server" not in banner
+
+
 def test_unauthorized_error_keeps_cors_for_allowed_origin():
     """Allowed browser origins must receive ACAO on 401 so auth failures are readable."""
     with running_server(
