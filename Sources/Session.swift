@@ -362,6 +362,29 @@ func detectAndExecuteMCPTools(
     return MCPExecutionResult(toolCalls: toolCalls, resultParts: resultParts, toolLog: toolLog)
 }
 
+/// The fixed CLI follow-up prompt template with an empty tool result, used to
+/// price the prompt overhead so the tool result gets the remaining token budget.
+private func cliFollowUpOverhead(userPrompt: String, systemPrompt: String?) -> String {
+    (systemPrompt ?? "")
+        + "The user asked: \(userPrompt)\n\nThe tool returned: \n\nAnswer the user's question using this result."
+}
+
+/// Truncate a tool-result string to a token budget derived from the model's
+/// context window minus the fixed prompt overhead and an output reserve, so a
+/// large tool result cannot overflow the context (CLI) or be dropped whole by
+/// the context trimmer while the prompt still references it (server) (#221).
+func truncateToolResultToBudget(
+    _ result: String,
+    overhead: String,
+    outputReserve: Int = 512
+) async -> String {
+    let inputBudget = await TokenCounter.shared.inputBudget(reservedForOutput: outputReserve)
+    let overheadTokens = await TokenCounter.shared.count(overhead)
+    let budget = max(0, inputBudget - overheadTokens)
+    let tokens = await TokenCounter.shared.count(result)
+    return ToolOutputTruncator.truncate(result, tokenCount: tokens, budgetTokens: budget).text
+}
+
 /// CLI path: execute MCP tool calls and re-prompt with a plain follow-up session.
 /// No conversation history is threaded — the follow-up gets only the user prompt + tool results.
 func executeMCPToolCallsForCLI(
@@ -377,7 +400,9 @@ func executeMCPToolCallsForCLI(
 
     var aggregatedLog = executed.toolLog
     let plainSession = makeSession(systemPrompt: systemPrompt)
-    var toolResult = executed.resultParts.joined(separator: "\n")
+    let overhead = cliFollowUpOverhead(userPrompt: userPrompt, systemPrompt: systemPrompt)
+    var toolResult = await truncateToolResultToBudget(
+        executed.resultParts.joined(separator: "\n"), overhead: overhead)
     var finalContent = try await plainSession.respond(
         to: "The user asked: \(userPrompt)\n\nThe tool returned: \(toolResult)\n\nAnswer the user's question using this result.",
         options: options
@@ -395,7 +420,8 @@ func executeMCPToolCallsForCLI(
           let followUp = try await detectAndExecuteMCPTools(in: finalContent, mcpManager: mcpManager) {
         reprompts += 1
         aggregatedLog.append(contentsOf: followUp.toolLog)
-        toolResult = followUp.resultParts.joined(separator: "\n")
+        toolResult = await truncateToolResultToBudget(
+            followUp.resultParts.joined(separator: "\n"), overhead: overhead)
         finalContent = try await plainSession.respond(
             to: "The user asked: \(userPrompt)\n\nThe tool returned: \(toolResult)\n\nAnswer the user's question using this result.",
             options: options
@@ -462,10 +488,29 @@ func executeMCPToolCallsForServer(
         return nil
     }
 
+    // Token-budget the tool results before appending them as `role: "tool"`
+    // messages. The context trimmer treats each message atomically, so a result
+    // bigger than the budget makes keepCount = 0 and the tool message is dropped
+    // while the synthetic prompt still references it - a confident
+    // hallucination. Truncating head+tail keeps the message present and small
+    // enough to survive trimming (#221). The returned toolLog stays full so the
+    // events log reports the real output.
+    let inputBudget = await TokenCounter.shared.inputBudget(reservedForOutput: 512)
+    let conversationText = messages.compactMap { $0.textContent }.joined(separator: "\n")
+    let overheadTokens = await TokenCounter.shared.count(conversationText)
+    let perResultBudget = max(0, inputBudget - overheadTokens) / max(1, executed.toolLog.count)
+    var truncatedResults: [(name: String, result: String)] = []
+    for entry in executed.toolLog {
+        let tokens = await TokenCounter.shared.count(entry.result)
+        let text = ToolOutputTruncator.truncate(
+            entry.result, tokenCount: tokens, budgetTokens: perResultBudget).text
+        truncatedResults.append((name: entry.name, result: text))
+    }
+
     let followUpMessages = appendExecutedToolResults(
         to: messages,
         toolCalls: executed.toolCalls,
-        toolResults: executed.toolLog.map { ($0.name, $0.result) }
+        toolResults: truncatedResults
     )
     let (followUpSession, followUpPrompt, _) = try await ContextManager.makeSession(
         messages: followUpMessages,

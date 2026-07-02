@@ -476,6 +476,33 @@ def test_mcp_duplicate_tool_names_warn_and_dedupe():
     assert "only_b" in log
 
 
+def test_mcp_huge_tool_output_is_truncated_not_fatal():
+    """A tool result far larger than the 4096-token window must be truncated
+    head+tail before the follow-up prompt, not overflow or be dropped (#221).
+
+    Before the fix the un-truncated ~40 KB result overflowed the context window
+    after the tool ran (CLI) or was dropped whole by the context trimmer while
+    the prompt still referenced it (server -> hallucination). Now the request
+    completes with a real answer instead of a context-overflow 500.
+    """
+    with running_custom_mcp_server(FIXTURES / "huge_output_mcp_server.py") as api_url:
+        resp = httpx.post(f"{api_url}/chat/completions", json={
+            "model": MODEL,
+            "messages": [
+                {"role": "user", "content": "Call the fetch_document tool, then summarize the document in one sentence."}
+            ],
+            "seed": 42,
+            "max_tokens": 200,
+        }, timeout=TIMEOUT)
+    assert resp.status_code == 200, f"huge tool output must not overflow: {resp.status_code} {resp.text[:300]}"
+    data = resp.json()
+    choice = data["choices"][0]
+    content = choice["message"]["content"]
+    assert content and content.strip(), "must produce an answer from the truncated result"
+    assert "context window" not in content.lower(), "must not report a context overflow as the answer"
+    assert '"tool_calls"' not in content, "raw tool-call JSON must not leak"
+
+
 def test_mcp_timed_out_connection_is_deregistered():
     """A timed-out MCP connection must be deregistered, not left permanently dead (#216).
 

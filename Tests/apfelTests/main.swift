@@ -82,6 +82,7 @@ suite("ChatRequestValidatorTests") { runChatRequestValidatorTests() }
 suite("OriginValidatorTests") { runOriginValidatorTests() }
 suite("MCPClientTests") { runMCPClientTests() }
 suite("MCPToolRegistryTests") { runMCPToolRegistryTests() }
+suite("ToolOutputTruncatorTests") { runToolOutputTruncatorTests() }
 suite("AsyncHarnessTests") { runAsyncHarnessTests() }
 suite("RetryTests") { runRetryTests() }
 suite("DebugLoggerTests") { runDebugLoggerTests() }
