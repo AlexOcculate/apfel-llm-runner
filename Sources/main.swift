@@ -151,6 +151,19 @@ if !quietMode {
     }
 }
 
+// Prewarm the model concurrently with input I/O (#364). Fire-and-forget so
+// the model cold-start overlaps the stdin read / conversation parsing below
+// instead of following it serially; in chat mode it overlaps the user typing
+// the first message. TokenCounter.prewarm() no-ops when the model is
+// unavailable, so the exit-5 path is untouched. The server path prewarms in
+// startServer (#169), never here.
+if PrewarmDecision.shouldPrewarm(mode: parsed.mode) {
+    debugLog("prewarm", "firing model prewarm before input read (mode=\(parsed.mode.rawValue))")
+    Task.detached(priority: .userInitiated) {
+        _ = await TokenCounter.shared.prewarm()
+    }
+}
+
 // Build the prompt: positional args + piped stdin + attached files.
 var prompt = parsed.prompt
 var fileContents = parsed.fileContents

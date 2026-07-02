@@ -124,6 +124,7 @@ suite("ChatHistoryTests") { runChatHistoryTests() }
 suite("CompletionsTests") { runCompletionsTests() }
 suite("SchemaFlagTests") { runSchemaFlagTests() }
 suite("MessagesFlagTests") { runMessagesFlagTests() }
+suite("PrewarmDecisionTests") { runPrewarmDecisionTests() }
 
 // MARK: - Summary
 

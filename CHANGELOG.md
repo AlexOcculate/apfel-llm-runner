@@ -7,6 +7,10 @@ and this project adheres to [https://semver.org/](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The CLI now prewarms the on-device model concurrently with input I/O (`LanguageModelSession.prewarm`, the mechanism the server has used since #169): single/stream invocations overlap the model cold-start with the piped-stdin read, and `--chat` warms while the user types the first message. No flags, no output changes - pure latency. `--serve` (own prewarm), `--count-tokens` (never calls the model), and `--benchmark` (would skew cold-start measurements) are excluded (#364).
+
 ### Added
 
 - `--messages <file|->`: one-shot multi-turn on the UNIX tool surface. Pass an OpenAI-style conversation (a bare JSON message array or an object with a `messages` key, from a file or piped stdin via `-`) and apfel prints the next assistant message - multi-turn agents in pure shell with `jq`, no server process, no TUI. Reuses the server's transcript building (`ContextManager.makeSession`) so CLI and server multi-turn semantics cannot drift, including the last-message-must-be-user-or-tool rule and context-strategy trimming. Composes with `--stream` and `--schema`; positional prompts, `-f`, and `--chat` combinations are usage errors (exit 2) (#363).

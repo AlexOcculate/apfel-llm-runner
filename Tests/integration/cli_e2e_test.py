@@ -1513,3 +1513,27 @@ def test_messages_composes_with_stream(tmp_path):
     result = run_cli(["--messages", str(conv), "--stream"], timeout=120)
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "zorbulax" in result.stdout.lower(), result.stdout
+
+
+# ============================================================================
+# CLI prewarm overlap (#364): fire-and-forget model prewarm before input I/O
+# ============================================================================
+
+
+def test_prewarm_debug_breadcrumb_on_single_mode():
+    """--debug shows the prewarm firing before input is read (model-free:
+    the breadcrumb is logged before the availability gate, so it appears
+    whether or not Apple Intelligence is enabled)."""
+    result = run_cli(["--debug", "--count-tokens", "hi"], timeout=30)
+    assert "prewarm" not in result.stderr.lower(), (
+        "count-tokens never calls the model and must not prewarm"
+    )
+    result = run_cli(["--debug", "hi"], timeout=120)
+    assert "prewarm" in result.stderr.lower(), result.stderr
+
+
+def test_no_prewarm_breadcrumb_without_debug():
+    """The prewarm is invisible in normal operation (zero output diffs)."""
+    result = run_cli(["--count-tokens", "hi"], timeout=30)
+    assert "prewarm" not in result.stderr.lower()
+    assert "prewarm" not in result.stdout.lower()
