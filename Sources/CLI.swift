@@ -695,8 +695,9 @@ func printUsage(to handle: FileHandle = .standardOutput) {
 
     \(styled("ENVIRONMENT:", .yellow, .bold))
       APFEL_SYSTEM_PROMPT       Default system prompt
-      APFEL_MCP                 MCP server paths (colon-separated)
+      APFEL_MCP                 MCP server paths (comma-separated; colon accepted for local paths)
       APFEL_MCP_TIMEOUT         MCP timeout in seconds [default: 5]
+      APFEL_MCP_TOKEN           Bearer token for remote MCP servers
       APFEL_HOST                Server bind address [default: 127.0.0.1]
       APFEL_PORT                Server port [default: 11434]
       APFEL_TOKEN               Bearer token for server authentication

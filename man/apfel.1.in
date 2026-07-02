@@ -309,7 +309,10 @@ Additional requests are queued.
 Default system prompt for every invocation.
 .TP
 .B APFEL_MCP
-Colon-separated list of MCP server paths or URLs to attach.
+Comma-separated list of MCP server paths or URLs to attach (a colon is
+also accepted for local paths, but commas are canonical because a colon
+would split remote URLs like
+.BR https://host:8080 ).
 Equivalent to repeating
 .BR \-\-mcp .
 .TP
