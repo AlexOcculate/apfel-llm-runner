@@ -67,28 +67,6 @@ SUBCOMMANDS
   apfel completions <shell>               Print shell completions (bash, zsh, fish)
 ```
 
-## Shell Completions
-
-`apfel completions <shell>` prints a completion script to stdout for `bash`, `zsh`, or `fish`. Homebrew installs them automatically. To enable them for a source/manual install, write the script to your shell's completion directory.
-
-bash:
-
-```bash
-apfel completions bash | sudo tee "$(brew --prefix)/etc/bash_completion.d/apfel" >/dev/null
-```
-
-zsh (a directory already on your `$fpath`):
-
-```bash
-apfel completions zsh > "${fpath[1]}/_apfel"
-```
-
-fish:
-
-```fish
-apfel completions fish > ~/.config/fish/completions/apfel.fish
-```
-
 ## Examples By Flag
 
 ```bash
@@ -198,6 +176,28 @@ apfel --demos ./apfel-demos
 ```
 
 Security details live in [server-security.md](server-security.md). Background-service usage lives in [background-service.md](background-service.md).
+
+## Shell Completions
+
+`apfel completions <shell>` prints a completion script to stdout for `bash`, `zsh`, or `fish`. Homebrew installs them automatically. To enable them for a source/manual install, write the script to your shell's completion directory.
+
+bash:
+
+```bash
+apfel completions bash | sudo tee "$(brew --prefix)/etc/bash_completion.d/apfel" >/dev/null
+```
+
+zsh (a directory already on your `$fpath`):
+
+```bash
+apfel completions zsh > "${fpath[1]}/_apfel"
+```
+
+fish:
+
+```fish
+apfel completions fish > ~/.config/fish/completions/apfel.fish
+```
 
 ## Exit Codes
 
