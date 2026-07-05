@@ -2,7 +2,7 @@
 
 apfel exposes Apple's on-device **Foundation Model** over a local OpenAI-compatible HTTP server. Any language that can `POST` JSON to `http://localhost:11434/v1/chat/completions` can use it - **100% on-device, zero API cost, no network required for inference**.
 
-These guides show how, in the idioms each language actually uses. Every code block on every guide was run against a live `apfel --serve` before publishing. The runnable scripts live in the [apfel-guides-lab](https://github.com/Arthur-Ficial/apfel-guides-lab) repo.
+These guides show how, in the idioms each language uses. Every code block was run against a live `apfel --serve` before publishing.
 
 ## Guides
 

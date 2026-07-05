@@ -70,7 +70,7 @@ apfel --serve
 
 ---
 
-Huge thanks to [**@tvi** (Tomas Virgl)](https://github.com/tvi) for contributing this integration and for taking the time to provide a working config and a real screenshot. This is exactly the kind of community contribution that makes apfel more useful.
+Thanks to [**@tvi** (Tomas Virgl)](https://github.com/tvi) for contributing this integration with a working config and a real screenshot.
 
 ---
 

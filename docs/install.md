@@ -5,7 +5,7 @@
 | Requirement | Details |
 |-------------|---------|
 | **Mac** | Apple Silicon |
-| **macOS** | **macOS 26.4** or later |
+| **macOS** | **macOS 26 (Tahoe)** or later |
 | **Apple Intelligence** | Must be [enabled in System Settings](https://support.apple.com/en-us/121115) |
 
 ## Option 1: Homebrew (recommended)
@@ -14,7 +14,7 @@
 brew install apfel
 ```
 
-Same-day releases (homebrew-core autobump can lag up to ~24h), and bundles the demo scripts as `apfel-<name>` commands:
+The tap publishes same-day releases (homebrew-core autobump can lag up to ~24h) and bundles the demo scripts as `apfel-<name>` commands:
 
 ```bash
 brew install Arthur-Ficial/tap/apfel

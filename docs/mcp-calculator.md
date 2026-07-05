@@ -4,7 +4,7 @@ apfel natively speaks the [https://modelcontextprotocol.io/](https://modelcontex
 
 All inference runs on-device with no network calls for the LLM itself. Optional remote MCP tool servers (`--mcp https://...`) do make network calls for tool arguments.
 
-> **Ready-made MCPs for apfel**: [apfel-mcp.franzai.com](https://apfel-mcp.franzai.com/) ships three token-budget-optimized MCP servers designed specifically for apfel's 4096-token context window: `url-fetch`, `ddg-search`, and the flagship compound `search-and-fetch` tool. Install with `brew install Arthur-Ficial/tap/apfel-mcp`. Repo is open for contributions of new apfel-optimized MCPs.
+> **Ready-made MCPs for apfel**: [apfel-mcp.franzai.com](https://apfel-mcp.franzai.com/) ships three token-budget-optimized MCP servers for apfel's 4096-token context window: `url-fetch`, `ddg-search`, and the flagship compound `search-and-fetch` tool. Details in [Ready-made MCPs](#ready-made-mcps) below.
 
 ## Quick start
 
@@ -53,7 +53,7 @@ apfel-run "What is 15 times 27?"    # same as apfel + all enabled MCPs
 apfel-run --list                    # see what's on / off
 ```
 
-This keeps apfel itself flag-only - the registry layer lives in its own 200-LOC wrapper.
+This keeps apfel itself flag-only - the registry layer lives in its own wrapper.
 
 ## Remote MCP servers
 

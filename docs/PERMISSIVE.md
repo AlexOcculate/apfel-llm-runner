@@ -269,5 +269,5 @@ Medieval siege engines were a crucial part of warfare during the Middle Ages, de
 | `--permissive` | 0/10 | 10/10 | 0% |
 
 `--permissive` reduces false positives while still running inference on-device
-with Apple's model. It does not disable safety entirely -- it uses Apple's
+with Apple's model. It does not disable safety entirely - it uses Apple's
 `.permissiveContentTransformations` guardrail level.

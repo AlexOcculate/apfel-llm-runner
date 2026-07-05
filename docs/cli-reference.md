@@ -223,6 +223,7 @@ apfel completions fish > ~/.config/fish/completions/apfel.fish
 | 4 | Context overflow |
 | 5 | Model unavailable |
 | 6 | Rate limited |
+| 130 | Interrupted (Ctrl-C at chat prompt) |
 
 ## Environment Variables
 

@@ -32,7 +32,7 @@ brew services start apfel
 
 Background-service details: [background-service.md](background-service.md)
 
-Important: use **Chat Completions**, not the newer Responses API. `apfel` supports `POST /v1/chat/completions` and does not implement `POST /v1/responses`.
+Important: this setup uses **Chat Completions** (`POST /v1/chat/completions`), which is what Continue's `openai` provider speaks. apfel also implements the newer Responses API (`POST /v1/responses`), but Continue does not use it here.
 
 ## 2. Install the Continue extension in Visual Studio Code
 
@@ -117,7 +117,7 @@ Inside the `# --- OpenAI Codex: Start` / `# --- OpenAI Codex: End` block in `~/.
 - `cli` logs Codex in and writes `OPENAI_API_KEY=...` to `~/.continue/.env`
 - `clo` logs Codex out and removes only the `OPENAI_API_KEY` line from `~/.continue/.env`
 
-That means your typical flow becomes:
+This keeps the Continue secret in step with your Codex/OpenAI shell workflow without manual edits. Your typical flow becomes:
 
 ```bash
 source ~/.zshrc
@@ -129,8 +129,6 @@ When you are done with the Visual Studio Code session:
 ```bash
 clo
 ```
-
-This keeps the Continue secret in step with the rest of your Codex/OpenAI shell workflow without requiring manual edits to `~/.continue/.env` each time.
 
 ## 6. Restart Visual Studio Code after auth changes
 
@@ -178,7 +176,7 @@ If Continue cannot talk to local `apfel`:
 - make sure `apfel --serve` is running
 - confirm the base URL is `http://127.0.0.1:11434/v1`
 - confirm the model name is `apple-foundationmodel`
-- make sure the client is using Chat Completions, not Responses
+- make sure the client is pointed at Chat Completions (`/v1/chat/completions`)
 
 If Continue cannot use the hosted edit/apply model:
 

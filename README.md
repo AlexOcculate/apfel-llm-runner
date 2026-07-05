@@ -172,7 +172,7 @@ apfel --mcp ./mcp/calculator/server.py "What is 15 times 27?"
 ```
 
 ```
-mcp: ./mcp/calculator/server.py - add, subtract, multiply, divide, sqrt, power    ← stderr
+mcp: ./mcp/calculator/server.py - add, subtract, multiply, divide, sqrt, power, round_number    ← stderr
 tool: multiply({"a": 15, "b": 27}) = 405                                          ← stderr
 15 times 27 is 405.                                                                ← stdout
 ```

@@ -1,6 +1,6 @@
 # Server Security
 
-apfel's HTTP server (`--serve`) runs on localhost by default and is designed for local development and on-device inference. This document explains the security settings and how to configure them for your specific use case.
+apfel's HTTP server (`--serve`) runs on localhost by default and is designed for local development and on-device inference. This document explains the security settings and how to configure them.
 
 ## How it works
 
@@ -305,7 +305,7 @@ The `--token` flag overrides `APFEL_TOKEN`. The `--token-auto` flag overrides bo
 
 ### `--footgun` - Disable all protections
 
-The shooting-yourself-in-the-foot-at-some-point-in-the-future option. Combines `--no-origin-check` and `--cors` to disable all security.
+Combines `--no-origin-check` and `--cors` to disable all security. The name is a warning: it is easy to leave enabled and regret later.
 
 ```bash
 apfel --serve --footgun
