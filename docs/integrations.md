@@ -10,7 +10,7 @@ For **scripting language guides** (how to call apfel from Python, Node.js, Ruby,
 
 [opencode](https://opencode.ai) is an open-source terminal AI coding agent. Wire it to apfel's OpenAI-compatible server and every token stays on-device at zero cost. Re-verified end-to-end on opencode 1.17.16 + apfel 1.8.2.
 
-Full setup, the verified config, a real transcript, and every gotcha (the big one: opencode injects `AGENTS.md`/`CLAUDE.md` into the system prompt, which overflows apfel's 4096-token window fast) are on the dedicated page: [docs/integrations/opencode.md](integrations/opencode.md).
+Full setup, the verified config, a real transcript, and every gotcha are on the dedicated page: [docs/integrations/opencode.md](integrations/opencode.md). The one you must not miss: opencode pastes your global `~/.claude/CLAUDE.md` into the system prompt, which overflows apfel's 4096-token window - fix it with `export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1`.
 
 ---
 
