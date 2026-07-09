@@ -8,69 +8,9 @@ For **scripting language guides** (how to call apfel from Python, Node.js, Ruby,
 
 ## opencode
 
-[opencode](https://opencode.ai) is an open-source terminal AI coding assistant. You can wire it to apfel's OpenAI-compatible server so all inference stays on-device at zero cost.
+[opencode](https://opencode.ai) is an open-source terminal AI coding agent. Wire it to apfel's OpenAI-compatible server and every token stays on-device at zero cost. Re-verified end-to-end on opencode 1.17.16 + apfel 1.8.2.
 
-**Config:** `~/.config/opencode/opencode.json`
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "autoupdate": true,
-  "compaction": {
-    "auto": true,
-    "prune": true,
-    "reserved": 512
-  },
-  "default_agent": "lean",
-  "agent": {
-    "lean": {
-      "mode": "primary",
-      "model": "apfel/apple-foundationmodel",
-      "prompt": "You are a concise assistant. Answer directly.",
-      "permission": {
-        "*": "deny"
-      }
-    }
-  },
-  "provider": {
-    "apfel": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "apfel",
-      "options": {
-        "baseURL": "http://127.0.0.1:11434/v1"
-      },
-      "models": {
-        "apple-foundationmodel": {
-          "name": "apple-foundationmodel"
-        }
-      }
-    }
-  }
-}
-```
-
-**Start apfel first:**
-
-```bash
-apfel --serve
-```
-
-**Why this config works the way it does:**
-
-- `default_agent: "lean"` - the lean agent has `"permission": { "*": "deny" }`, which means opencode won't try to inject tool schemas. This matters because apfel has a 4096-token context window - tool schemas eat into it fast.
-- `compaction.reserved: 512` - reserves 512 tokens for output. Keeps the model from running out of room mid-answer.
-- `"npm": "@ai-sdk/openai-compatible"` - opencode's provider system. This package speaks the OpenAI REST protocol, which apfel implements at `/v1/chat/completions`.
-- `baseURL: "http://127.0.0.1:11434/v1"` - apfel's default port and path.
-
-**Result:** $0.00/request, fully on-device, 1-2s response times.
-
-![opencode using apple-foundationmodel via apfel](../screenshots/opencode-integration.png)
-
-*opencode 1.3.17, answering from the `lean` agent backed by `apple-foundationmodel` via apfel. Context: 1,181 tokens, $0.00 spent.*
-
----
-
-Thanks to [**@tvi** (Tomas Virgl)](https://github.com/tvi) for contributing this integration with a working config and a real screenshot.
+Full setup, the verified config, a real transcript, and every gotcha (the big one: opencode injects `AGENTS.md`/`CLAUDE.md` into the system prompt, which overflows apfel's 4096-token window fast) are on the dedicated page: [docs/integrations/opencode.md](integrations/opencode.md).
 
 ---
 
