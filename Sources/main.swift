@@ -343,7 +343,9 @@ do {
         try await runBenchmarks()
 
     case .chat:
-        try await chat(systemPrompt: parsed.systemPrompt, options: sessionOpts, mcpManager: mcpManager, contextStatus: parsed.contextStatus)
+        // `-f file` / piped / positional content is merged into `prompt` above;
+        // seed it into the chat context instead of dropping it silently (#370).
+        try await chat(systemPrompt: parsed.systemPrompt, initialContext: prompt.isEmpty ? nil : prompt, options: sessionOpts, mcpManager: mcpManager, contextStatus: parsed.contextStatus)
 
     case .stream:
         if let messagesJSON {

@@ -1144,3 +1144,61 @@ def test_chat_history_off_by_default(tmp_path):
         timeout=90,
     )
     assert histfile.read_bytes() == before, "history file modified despite opt-out"
+
+
+# ---------------------------------------------------------------------------
+# Category: -f / positional content seeded into chat context (#370)
+#
+# Regression for the silent-drop bug: `apfel -f file --chat` parsed the file
+# but the .chat dispatch ignored it, so the content never reached the model.
+# The fix seeds the chat session transcript with that content as an initial
+# user turn and prints a one-line notice on startup.
+# ---------------------------------------------------------------------------
+
+def test_chat_f_flag_prints_context_notice(tmp_path):
+    """`-f file --chat` announces the loaded context on startup (#370).
+
+    Model-light: only needs chat to reach its header (which requires the model
+    to be available), not a correct completion. Proves the -f content is no
+    longer silently dropped before the REPL starts.
+    """
+    require_model()
+    f = tmp_path / "note.txt"
+    f.write_text("The onboarding owner is Priya.\n")
+    returncode, output = run_chat_tty(
+        ["-f", str(f), "--chat"],
+        steps=[
+            (b"Type 'quit'", b"quit\n"),
+        ],
+        stop_when=lambda out: b"Goodbye" in out,
+        timeout=90,
+    )
+    clean = strip_ansi(output).lower()
+    assert "context" in clean, f"no context-loaded notice on startup: {clean[:400]!r}"
+
+
+def test_chat_f_flag_content_is_in_context(tmp_path):
+    """`-f file --chat` puts the file content in the model's context (#370).
+
+    The model must be able to answer a question about the file on the very
+    first turn - proving the seeded transcript reached it.
+    """
+    require_model()
+    f = tmp_path / "fact.txt"
+    f.write_text("The project codeword is ZORBLAX. Remember it.\n")
+    returncode, output = run_chat_tty(
+        ["-f", str(f), "--chat"],
+        steps=[
+            (b"Type 'quit'", b"What is the project codeword?\n"),
+            # Once the ai prompt appears, let the answer stream, then quit.
+            # This terminates cleanly whether or not the model recalls, so a
+            # miss fails the assertion instead of hanging to the timeout.
+            (b"ai\xe2\x80\xba", b"quit\n", 8),
+        ],
+        stop_when=lambda out: b"Goodbye" in out,
+        timeout=120,
+    )
+    clean = strip_ansi(output)
+    assert "ZORBLAX" in clean.upper(), (
+        f"model did not recall the file content from context: {clean[:500]!r}"
+    )

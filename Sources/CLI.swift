@@ -320,11 +320,21 @@ func countTokens(
 // MARK: - Interactive Chat
 
 /// Run an interactive multi-turn chat session with context window protection.
-func chat(systemPrompt: String?, options: SessionOptions = .defaults, mcpManager: MCPManager? = nil, contextStatus: Bool = false) async throws {
+func chat(systemPrompt: String?, initialContext: String? = nil, options: SessionOptions = .defaults, mcpManager: MCPManager? = nil, contextStatus: Bool = false) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
         printError("--chat requires an interactive terminal (stdin must be a TTY)")
         exit(exitUsageError)
     }
+
+    // `-f file` (and any positional prompt) seed the conversation: the extracted
+    // content is folded into the session instructions so the model already has
+    // it in context on the first turn. Before #370 the .chat dispatch dropped
+    // this content silently. Folding into instructions (rather than a dangling
+    // user turn) keeps the transcript well-formed for the first respond() call.
+    let contextPreamble: String? = {
+        guard let seed = initialContext, !seed.isEmpty else { return nil }
+        return "The following is content the user attached for reference. Use it to answer their questions:\n\n\(seed)\n\n(End of attached content.)"
+    }()
 
     // Keep SIGINT blocked while chat bootstraps so background threads spawned
     // during model/session setup do not inherit an unblocked Ctrl-C.
@@ -343,6 +353,7 @@ func chat(systemPrompt: String?, options: SessionOptions = .defaults, mcpManager
         // so native interception breaks tool execution in chat mode (#144).
         var instrParts: [String] = []
         if let sys = systemPrompt { instrParts.append(sys) }
+        if let pre = contextPreamble { instrParts.append(pre) }
         let toolNames = mcpTools.map { $0.function.name }
         instrParts.append(ToolCallHandler.buildOutputFormatInstructions(toolNames: toolNames))
         instrParts.append("IMPORTANT: You may ONLY call the functions listed above (\(toolNames.joined(separator: ", "))). Do NOT invent function names. If the user's request cannot be handled by these specific functions, respond with plain text.")
@@ -354,7 +365,11 @@ func chat(systemPrompt: String?, options: SessionOptions = .defaults, mcpManager
         session = makeTranscriptSession(model: model, entries: [.instructions(instr)])
         debugLog("chat", "session created with \(mcpTools.count) text-injected tools")
     } else {
-        session = makeSession(systemPrompt: systemPrompt, options: options)
+        let combinedSystem = [systemPrompt, contextPreamble]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        session = makeSession(systemPrompt: combinedSystem.isEmpty ? nil : combinedSystem, options: options)
     }
     let genOpts = makeGenerationOptions(options)
     // Persistent history is opt-in via APFEL_HISTFILE (off by default). The
@@ -374,6 +389,14 @@ func chat(systemPrompt: String?, options: SessionOptions = .defaults, mcpManager
                 printStderr(sysLine)
             } else {
                 print(sysLine)
+            }
+        }
+        if let seed = initialContext, !seed.isEmpty {
+            let ctxLine = styled("context: ", .magenta, .bold) + styled("loaded \(seed.count) chars into the conversation", .dim)
+            if outputFormat == .json {
+                printStderr(ctxLine)
+            } else {
+                print(ctxLine)
             }
         }
         let hint = styled("Type 'quit' to exit.\n", .dim)

@@ -7,6 +7,14 @@ and this project adheres to [https://semver.org/](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `-f file` (and a positional prompt or piped content) is now honored in `--chat` instead of being silently dropped. The extracted content is folded into the session instructions so the model already has it in context on the first turn, and chat prints a one-line `context:` notice on startup. Previously `apfel -f code.swift --chat` read/OCR'd the file at parse time and then threw it away (#370).
+
+### Changed
+
+- Modes that neither read a one-shot prompt nor run per-request generation - `--serve`, `--benchmark`, `--model-info`, `--update` - now reject a positional prompt, `-f/--file` content, `-s/--system`, or any generation/context tuning flag (`--temperature`, `--top-p`, `--max-tokens`, `--seed`, `--context-strategy`, `--context-max-turns`, `--context-output-reserve`) with a usage error (exit 2) instead of parsing and silently ignoring it. `--context-status` is likewise rejected outside `--chat`. `--serve` still consumes `--permissive`, `--retry*`, `--mcp`, and the server flags. Found by an audit of the same silent-drop class as #370.
+
 ## [1.8.1] - 2026-07-09
 
 ### Fixed

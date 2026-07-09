@@ -269,6 +269,34 @@ extension CLIArguments {
                 throw CLIParseError("--messages cannot be combined with -f/--file; inline file content into the conversation JSON")
             }
         }
+        // Silent-drop guard (#370 audit): .serve/.benchmark/.model-info/.update
+        // neither read a one-shot prompt nor run per-request generation, so a
+        // positional prompt, -f file, system prompt, or generation/context
+        // tuning flag was parsed and then silently ignored. Reject it loudly
+        // rather than pretend it took effect. (.serve still honors --permissive,
+        // --retry, --mcp, and the server flags - those are consumed.)
+        let inputIgnoringModes: Set<Mode> = [.serve, .benchmark, .modelInfo, .update]
+        if inputIgnoringModes.contains(mode) {
+            var offender: String? = nil
+            if !prompt.isEmpty { offender = "a positional prompt" }
+            else if !fileContents.isEmpty || !fileAttachments.isEmpty { offender = "-f/--file content" }
+            else if systemPrompt != nil { offender = "-s/--system" }
+            else if temperature != nil { offender = "--temperature" }
+            else if topP != nil { offender = "--top-p" }
+            else if maxTokens != nil { offender = "--max-tokens" }
+            else if seed != nil { offender = "--seed" }
+            else if contextStrategy != nil { offender = "--context-strategy" }
+            else if contextMaxTurns != nil { offender = "--context-max-turns" }
+            else if contextOutputReserve != nil { offender = "--context-output-reserve" }
+            if let offender {
+                throw CLIParseError("--\(mode.rawValue) does not accept \(offender) - it would be ignored in this mode")
+            }
+        }
+        // --context-status is a --chat-only display toggle; it does nothing in
+        // any other mode, so reject it there instead of silently ignoring it.
+        if contextStatus && mode != .chat {
+            throw CLIParseError("--context-status only applies to --chat")
+        }
         // Future cross-flag checks live here.
     }
 }

@@ -366,6 +366,55 @@ def test_completions_in_help():
     assert "completions" in result.stdout
 
 
+# ---------------------------------------------------------------------------
+# Silent-drop guard (#370 audit): input-ignoring modes reject input they would
+# otherwise discard. Model-free - all exit at validation before the model.
+# ---------------------------------------------------------------------------
+
+def test_serve_rejects_positional_prompt():
+    result = run_cli(["--serve", "hello"], timeout=15)
+    assert result.returncode == 2
+    assert "does not accept" in result.stderr.lower()
+    assert "positional prompt" in result.stderr.lower()
+
+
+def test_serve_rejects_system_prompt():
+    result = run_cli(["--serve", "-s", "be terse"], timeout=15)
+    assert result.returncode == 2
+    assert "system" in result.stderr.lower()
+
+
+def test_serve_rejects_generation_flag():
+    result = run_cli(["--serve", "--temperature", "0.5"], timeout=15)
+    assert result.returncode == 2
+    assert "temperature" in result.stderr.lower()
+
+
+def test_benchmark_rejects_positional_prompt():
+    result = run_cli(["--benchmark", "hello"], timeout=15)
+    assert result.returncode == 2
+    assert "does not accept" in result.stderr.lower()
+
+
+def test_model_info_rejects_tuning_flag():
+    result = run_cli(["--model-info", "--seed", "3"], timeout=15)
+    assert result.returncode == 2
+    assert "seed" in result.stderr.lower()
+
+
+def test_context_status_rejected_outside_chat():
+    result = run_cli(["--context-status", "hi"], timeout=15)
+    assert result.returncode == 2
+    assert "context-status" in result.stderr.lower()
+
+
+def test_serve_still_accepts_server_flags():
+    # --permissive is consumed by the server, so it must NOT be rejected.
+    # --help short-circuits before the server binds a port.
+    result = run_cli(["--serve", "--permissive", "--help"], timeout=15)
+    assert result.returncode == 0
+
+
 def test_committed_completion_files_match_binary():
     """The checked-in completions/apfel.{bash,zsh,fish} must match the binary.
 
