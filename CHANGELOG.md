@@ -7,6 +7,8 @@ and this project adheres to [https://semver.org/](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-07-09
+
 ### Added
 
 - `--code`: print only the code. Crops the response to the content of its first fenced code block (fence markers and surrounding prose removed); when the model returns no fence at all, the whole response passes through as the code, and a response that is exactly one inline code span is unwrapped. A steering directive is appended to the system prompt (composes with `-s`); extraction is deterministic regardless of model compliance. `apfel --code "python calculator" > calc.py` and `apfel --code "battery one-liner" | pbcopy` now work without a hand-rolled fence stripper. Composes with `-f`, `--messages`, piped stdin, and `-o json` (envelope gains an advisory `language` key); rejects `--stream`, `--chat`, and `--schema` with a usage error. New exit code 7: the model returned an empty response. Empirically validated against a 20-prompt battery across bash, git, awk, sed, curl, ffmpeg, python, swift, node, sql, jq, and German-language asks (#373).
