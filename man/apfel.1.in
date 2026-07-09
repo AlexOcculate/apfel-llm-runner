@@ -140,6 +140,34 @@ or
 .BR \-\-chat .
 A malformed conversation is a usage error (exit 2).
 .TP
+.B \-\-code
+Print only the code: crop the response to the content of its first
+fenced code block, with the fence markers and any surrounding prose
+removed. A steering directive is appended to the system prompt so the
+model answers with exactly one fenced block; the crop is applied
+deterministically regardless. When the response contains no fence at
+all, the whole response is passed through as the code (a fully steered
+model omits the fence), and a response that is exactly one inline
+code span is unwrapped. Output is newline-terminated. An empty
+response writes nothing and exits
+.BR 7 .
+Composes with
+.BR \-s ,
+.BR \-f ,
+.BR \-\-messages ,
+and piped stdin; with
+.B \-\-output json
+the envelope carries the cropped code as
+.B content
+plus an advisory
+.B language
+key. Cannot be combined with
+.BR \-\-stream ,
+.BR \-\-chat ,
+or
+.BR \-\-schema .
+The crop shapes the format, not the correctness, of the answer.
+.TP
 .BR \-o ", " \-\-output " " \fIformat\fR
 Output format.
 .I format
@@ -455,6 +483,11 @@ model is not downloaded.
 Rate limited or busy. Exceeded
 .BR \-\-max-concurrent ,
 or a concurrent session lock is held.
+.TP
+.B 7
+No code in response. With
+.BR \-\-code ,
+the model returned an empty response, so there is no code to print.
 .TP
 .B 130
 Interrupted. The user pressed Ctrl-C (SIGINT) at the interactive chat

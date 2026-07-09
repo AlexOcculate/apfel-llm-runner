@@ -162,6 +162,12 @@ run coding "Write a Python function that checks if a number is prime."
 run coding "Write a Swift function that reverses a string without using built-in reverse."
 run coding "What is the time complexity of binary search? Explain in one sentence."
 run coding "Find the bug: for i in range(10): if i = 5: print(i)"
+run_with_flags coding \
+    'apfel --code "Write a Python function that deduplicates a list, keeping order."' \
+    --code "Write a Python function that deduplicates a list, keeping order."
+run_with_flags coding \
+    'apfel --code "shell one-liner that shows the 5 largest files in the current directory"' \
+    --code "shell one-liner that shows the 5 largest files in the current directory"
 
 # ============================================================================
 echo "## 6. Math & Logic" >&2

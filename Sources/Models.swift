@@ -10,6 +10,9 @@ import ApfelCore
 struct ApfelResponse: Encodable {
     let model: String
     let content: String
+    /// `--code` only (#373): first word of the fence info string, lowercased.
+    /// Model-reported and advisory; omitted from JSON when nil.
+    var language: String? = nil
     let metadata: Metadata
     struct Metadata: Encodable {
         let onDevice: Bool

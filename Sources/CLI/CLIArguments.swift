@@ -70,6 +70,11 @@ public struct CLIArguments: Sendable, Equatable {
     /// Exit 4 when over budget (only valid with `--count-tokens`).
     public var strictCount: Bool = false
 
+    /// Print only the first fenced code block of the response (#373). Pairs a
+    /// steering system-prompt directive with `CodeCropper.extract`; a response
+    /// without a code block exits `ApfelExitCodes.noCode` (7).
+    public var codeOnly: Bool = false
+
     /// Raw JSON Schema text from `--schema <file>` (#361). Validated at parse
     /// time via `SchemaParser` so a malformed schema is a usage error (exit 2),
     /// never a runtime failure. nil => unconstrained generation.
@@ -162,7 +167,7 @@ public struct CLIArguments: Sendable, Equatable {
         "--context-strategy", "--context-max-turns", "--context-output-reserve",
         "--context-status",
         "-f", "--file",
-        "--schema", "--messages",
+        "--schema", "--messages", "--code",
     ]
 
     /// Derive the generation-schema root name from a `--schema` file path:
@@ -254,6 +259,20 @@ extension CLIArguments {
             }
             if !mcpServerPaths.isEmpty {
                 throw CLIParseError("--schema cannot be combined with MCP tool calling (--mcp / APFEL_MCP)")
+            }
+        }
+        if codeOnly {
+            // --code is a single-shot output contract (#373): the complete
+            // response is cropped to its first fenced block. Streaming cannot
+            // crop before the closing fence arrives, chat is conversational,
+            // and the non-generating modes have no response to crop.
+            if mode != .single {
+                throw CLIParseError("--code requires a single one-shot prompt; cannot combine with --\(mode.rawValue)")
+            }
+            // Schema-constrained JSON and code-cropping are contradictory
+            // output contracts.
+            if schemaJSON != nil {
+                throw CLIParseError("--code cannot be combined with --schema; pick one output contract")
             }
         }
         if messagesJSON != nil || messagesFromStdin {
@@ -599,6 +618,9 @@ extension CLIArguments {
 
             case "--strict":
                 result.strictCount = true
+
+            case "--code":
+                result.codeOnly = true
 
             case "--model-info":
                 context.modeFlagsSeen.append("--model-info")

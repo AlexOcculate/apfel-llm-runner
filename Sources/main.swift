@@ -364,12 +364,22 @@ do {
         }
 
     case .single:
+        // --code (#373): append the steering directive so the model answers
+        // with exactly one fenced block; the deterministic crop happens in
+        // singlePrompt/messagesPrompt regardless of compliance.
+        let effectiveSystemPrompt = parsed.codeOnly
+            ? [parsed.systemPrompt, CodeCropper.steeringDirective].compactMap { $0 }.joined(separator: "\n\n")
+            : parsed.systemPrompt
         if let messagesJSON {
             // --messages: one-shot multi-turn (#363); composes with --schema.
-            try await messagesPrompt(
-                messagesJSON: messagesJSON, systemPrompt: parsed.systemPrompt,
+            let status = try await messagesPrompt(
+                messagesJSON: messagesJSON, systemPrompt: effectiveSystemPrompt,
                 stream: false, schemaJSON: parsed.schemaJSON, schemaName: parsed.schemaName,
-                options: sessionOpts, mcpManager: mcpManager)
+                options: sessionOpts, mcpManager: mcpManager, codeOnly: parsed.codeOnly)
+            if status != 0 {
+                await shutdownMCP()
+                exit(status)
+            }
         } else if prompt.isEmpty {
             printError("no prompt provided")
             await shutdownMCP()
@@ -384,7 +394,11 @@ do {
         } else {
             // The bare-pipe case (`echo hi | apfel`) streams to preserve its
             // historical output behavior; an explicit prompt does not (#222).
-            try await singlePrompt(prompt, systemPrompt: parsed.systemPrompt, stream: noArgsPipe, options: sessionOpts, mcpManager: mcpManager)
+            let status = try await singlePrompt(prompt, systemPrompt: effectiveSystemPrompt, stream: noArgsPipe, options: sessionOpts, mcpManager: mcpManager, codeOnly: parsed.codeOnly)
+            if status != 0 {
+                await shutdownMCP()
+                exit(status)
+            }
         }
 
     case .countTokens:

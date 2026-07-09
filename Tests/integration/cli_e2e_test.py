@@ -1598,3 +1598,163 @@ def test_no_prewarm_breadcrumb_without_debug():
     result = run_cli(["--count-tokens", "hi"], timeout=30)
     assert "prewarm" not in result.stderr.lower()
     assert "prewarm" not in result.stdout.lower()
+
+
+# ============================================================================
+# --code: crop the response to only the code (#373)
+# ============================================================================
+# Model tests assert STRUCTURAL properties only (no fence markers, parseable
+# python, JSON envelope shape) - never phrase content, which flakes on
+# unseeded runs (the v1.8.0 preflight lesson). The extraction policy itself
+# is locked by the 30+ CodeCropper unit tests; these prove the wiring.
+
+
+def test_code_stream_conflict_rejected():
+    """--code --stream is a usage error (exit 2), #370 doctrine."""
+    result = run_cli(["--code", "--stream", "hi"], timeout=30)
+    assert result.returncode == 2
+    assert "--code" in result.stderr
+
+
+def test_code_chat_conflict_rejected():
+    result = run_cli(["--code", "--chat"], timeout=30)
+    assert result.returncode == 2
+    assert "--code" in result.stderr
+
+
+def test_code_serve_conflict_rejected():
+    result = run_cli(["--code", "--serve"], timeout=30)
+    assert result.returncode == 2
+    assert "--code" in result.stderr
+
+
+def test_code_schema_conflict_rejected(tmp_path):
+    schema = tmp_path / "s.json"
+    schema.write_text('{"type":"object","properties":{"a":{"type":"string"}}}')
+    result = run_cli(["--code", "--schema", str(schema), "hi"], timeout=30)
+    assert result.returncode == 2
+    assert "--code" in result.stderr
+    assert "--schema" in result.stderr
+
+
+def test_code_flag_in_help_and_completions():
+    """--code is documented in --help and present in all three completions."""
+    result = run_cli(["--help"], timeout=30)
+    assert result.returncode == 0
+    assert "--code" in result.stdout
+    for shell, token in (("bash", "--code"), ("zsh", "--code"), ("fish", "-l code")):
+        comp = run_cli(["completions", shell], timeout=30)
+        assert comp.returncode == 0
+        assert token in comp.stdout, f"{shell} completions missing --code"
+
+
+@pytest.mark.model
+def test_code_python_output_is_bare_parseable_code():
+    """The flagship use case: apfel --code "python function" > file.py must
+    yield fence-free, syntactically valid Python. ast.parse is the objective,
+    content-free correctness check."""
+    import ast
+
+    require_model()
+    result = run_cli(
+        ["--code", "write a python function that adds two numbers"],
+        timeout=120,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert result.stdout.strip(), "expected code on stdout"
+    assert "```" not in result.stdout, f"fence leaked: {result.stdout!r}"
+    ast.parse(result.stdout)  # raises SyntaxError on prose/fences
+    assert result.stdout.endswith("\n"), "output must be newline-terminated"
+    assert not result.stdout.endswith("\n\n"), "exactly one trailing newline"
+
+
+@pytest.mark.model
+def test_code_shell_oneliner_is_compact():
+    require_model()
+    result = run_cli(
+        ["--code", "a shell one-liner that prints the word hello"],
+        timeout=120,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert result.stdout.strip()
+    assert "```" not in result.stdout
+    # a one-liner ask must not come back as a prose essay (loose bound)
+    assert len(result.stdout.strip().splitlines()) <= 4, result.stdout
+
+
+@pytest.mark.model
+def test_code_json_envelope_has_content_and_language():
+    require_model()
+    result = run_cli(
+        ["--code", "-o", "json", "write a python function that returns 42"],
+        timeout=120,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    payload = json.loads(result.stdout)
+    assert payload["model"] == "apple-foundationmodel"
+    assert payload["content"].strip()
+    assert "```" not in payload["content"]
+    # language is advisory and may be absent (bare pass-through); when present
+    # it must be a lowercase token
+    if "language" in payload and payload["language"] is not None:
+        assert payload["language"] == payload["language"].lower()
+
+
+@pytest.mark.model
+def test_code_composes_with_system_prompt():
+    """-s composes with --code: steering appends, does not replace."""
+    require_model()
+    result = run_cli(
+        ["--code", "-s", "you are a python expert", "a function that doubles a number"],
+        timeout=120,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert result.stdout.strip()
+    assert "```" not in result.stdout
+
+
+# One-liner battery: a compact integration version of the #373 20-prompt
+# validation run. Each case is a realistic terminal ask; the asserts are
+# structural (exit 0, non-empty, fence-free, compact) - never phrase content.
+ONELINER_PROMPTS = [
+    "one-liner to find the 10 largest files in the current directory",
+    "git command to undo the last commit but keep the changes",
+    "awk one-liner to sum the second column of a csv",
+    "curl command to POST json to an api with a bearer token",
+    "jq command to extract the name field from every element of an array",
+    "command to list all outdated homebrew packages",
+]
+
+
+@pytest.mark.model
+@pytest.mark.parametrize("prompt", ONELINER_PROMPTS)
+def test_code_oneliner_battery(prompt):
+    require_model()
+    result = run_cli(["--code", prompt], timeout=120)
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert result.stdout.strip(), "expected a command on stdout"
+    assert "```" not in result.stdout, f"fence leaked: {result.stdout!r}"
+    assert len(result.stdout.strip().splitlines()) <= 4, (
+        f"one-liner ask returned an essay: {result.stdout!r}"
+    )
+
+
+@pytest.mark.model
+def test_demo_cmd_and_oneliner_scripts_work(tmp_path):
+    """The bundled cmd and oneliner demos (upgraded to --code in #373) run
+    end-to-end: `apfel --demos` writes them, they execute, and they emit a
+    fence-free command line."""
+    require_model()
+    result = run_cli(["--demos", str(tmp_path / "demos")], timeout=30)
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    for script, ask in (("cmd", "list files sorted by size"),
+                        ("oneliner", "count lines in every text file")):
+        path = tmp_path / "demos" / script
+        assert path.exists(), f"--demos did not write {script}"
+        proc = subprocess.run(
+            [str(path), ask], capture_output=True, text=True, timeout=120,
+            env={**os.environ, "PATH": f"{BINARY.parent}:{os.environ['PATH']}"},
+        )
+        assert proc.returncode == 0, f"{script} failed: {proc.stderr}"
+        assert proc.stdout.strip(), f"{script} produced no output"
+        assert "```" not in proc.stdout, f"{script} leaked a fence: {proc.stdout!r}"

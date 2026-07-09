@@ -34,11 +34,15 @@ func printHeader() {
 /// Behavior depends on output format:
 /// - **plain**: Print response directly. If streaming, print tokens as they arrive.
 /// - **json**: Buffer the complete response, then emit a single JSON object.
-func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options: SessionOptions = .defaults, mcpManager: MCPManager? = nil) async throws {
+/// Returns the process exit code: 0, or `ApfelExitCodes.noCode` when
+/// `codeOnly` found no fenced block. Discardable because the `--stream` call
+/// sites cannot set `codeOnly` (rejected at parse time) and always get 0.
+@discardableResult
+func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options: SessionOptions = .defaults, mcpManager: MCPManager? = nil, codeOnly: Bool = false) async throws -> Int32 {
     let mcpTools = await mcpManager?.allTools() ?? []
     let hasMCPTools = !mcpTools.isEmpty
 
-    debugLog("single", "prompt_length=\(prompt.count) stream=\(stream) mcp=\(hasMCPTools)")
+    debugLog("single", "prompt_length=\(prompt.count) stream=\(stream) mcp=\(hasMCPTools) code=\(codeOnly)")
 
     let session: LanguageModelSession
     let finalPrompt: String
@@ -54,11 +58,19 @@ func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options
     }
     let genOpts = makeGenerationOptions(options)
 
+    // --code buffers the whole response (the crop needs the closing fence),
+    // so delta printing is off even on the bare-pipe streaming path.
     let result = try await processPrompt(
         prompt: finalPrompt, systemPrompt: systemPrompt, session: session,
         options: options, genOpts: genOpts, stream: stream,
-        printDelta: outputFormat == .plain, mcpManager: mcpManager, hasMCPTools: hasMCPTools)
+        printDelta: outputFormat == .plain && !codeOnly, mcpManager: mcpManager, hasMCPTools: hasMCPTools)
     printToolLog(result.toolLog)
+
+    if codeOnly {
+        let exitCode = printCroppedResponse(result.content)
+        printLengthWarningIfNeeded(result.finishReason)
+        return exitCode
+    }
 
     switch outputFormat {
     case .plain:
@@ -70,7 +82,37 @@ func singlePrompt(_ prompt: String, systemPrompt: String?, stream: Bool, options
         print(jsonString(obj))
     }
 
-    if result.finishReason == .length {
+    printLengthWarningIfNeeded(result.finishReason)
+    return 0
+}
+
+/// Print the `--code` output contract (#373): the first fenced block's
+/// content (or, with no fence anywhere, the bare response — a fully steered
+/// model omits the fence and the response IS the code) to stdout, nothing
+/// else. An empty response exits `noCode` (7) so scripts can branch on
+/// "no code" vs "run failed".
+func printCroppedResponse(_ content: String) -> Int32 {
+    guard let crop = CodeCropper.crop(from: content) else {
+        printStderr("\(styledErr("apfel:", .yellow)) empty model response, no code to print")
+        return ApfelExitCodes.noCode
+    }
+    switch outputFormat {
+    case .plain:
+        // crop.code already ends with exactly one newline (or is empty for a
+        // deliberately empty block) — print verbatim, no extra terminator.
+        print(crop.code, terminator: "")
+    case .json:
+        let obj = ApfelResponse(
+            model: modelName, content: crop.code, language: crop.language,
+            metadata: .init(onDevice: true, version: version))
+        print(jsonString(obj))
+    }
+    return 0
+}
+
+/// Shared stderr warning for responses truncated at the context window.
+func printLengthWarningIfNeeded(_ finishReason: FinishReason?) {
+    if finishReason == .length {
         printStderr("\(styledErr("apfel:", .yellow)) response truncated at the context window (finish_reason=length). Pass --max-tokens to control the cap explicitly.")
     }
 }
@@ -118,6 +160,9 @@ func structuredSinglePrompt(
 /// (`ContextManager.makeSession`) so CLI and server multi-turn semantics
 /// cannot drift. Composes with `--stream` (delta printing) and `--schema`
 /// (schema-guaranteed reply to the conversation).
+/// Returns the process exit code: 0, or `ApfelExitCodes.noCode` when
+/// `codeOnly` found no fenced block (same contract as `singlePrompt`).
+@discardableResult
 func messagesPrompt(
     messagesJSON: String,
     systemPrompt: String?,
@@ -125,8 +170,9 @@ func messagesPrompt(
     schemaJSON: String?,
     schemaName: String?,
     options: SessionOptions = .defaults,
-    mcpManager: MCPManager? = nil
-) async throws {
+    mcpManager: MCPManager? = nil,
+    codeOnly: Bool = false
+) async throws -> Int32 {
     var messages = try MessagesInput.decode(messagesJSON)
     if let sys = systemPrompt {
         messages.insert(OpenAIMessage(role: "system", content: .text(sys)), at: 0)
@@ -154,14 +200,20 @@ func messagesPrompt(
                 metadata: .init(onDevice: true, version: version))
             print(jsonString(obj))
         }
-        return
+        return 0
     }
 
     let result = try await processPrompt(
         prompt: finalPrompt, systemPrompt: systemPrompt, session: session,
         options: options, genOpts: genOpts, stream: stream,
-        printDelta: outputFormat == .plain, mcpManager: mcpManager, hasMCPTools: hasMCPTools)
+        printDelta: outputFormat == .plain && !codeOnly, mcpManager: mcpManager, hasMCPTools: hasMCPTools)
     printToolLog(result.toolLog)
+
+    if codeOnly {
+        let exitCode = printCroppedResponse(result.content)
+        printLengthWarningIfNeeded(result.finishReason)
+        return exitCode
+    }
 
     switch outputFormat {
     case .plain:
@@ -173,9 +225,8 @@ func messagesPrompt(
         print(jsonString(obj))
     }
 
-    if result.finishReason == .length {
-        printStderr("\(styledErr("apfel:", .yellow)) response truncated at the context window (finish_reason=length). Pass --max-tokens to control the cap explicitly.")
-    }
+    printLengthWarningIfNeeded(result.finishReason)
+    return 0
 }
 
 // MARK: - Token Budget Preflight
@@ -789,6 +840,8 @@ func printUsage(to handle: FileHandle = .standardOutput) {
           --system-file <path>  Read system prompt from file
           --schema <path>       Constrain output to a JSON Schema file (guaranteed valid JSON)
           --messages <path|->   One-shot multi-turn: OpenAI messages JSON from file or stdin
+          --code                Print only the code: first fenced block, or the bare
+                                response when unfenced. Exit 7 on an empty response
       -o, --output <format>     Output format: plain, json [default: plain]
       -q, --quiet               Suppress non-essential output
           --no-color             Disable colored output

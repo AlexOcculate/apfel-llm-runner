@@ -78,6 +78,7 @@ suite("ToolCallHandlerTests") { runToolCallHandlerTests() }
 suite("ContextStrategyTests") { runContextStrategyTests() }
 suite("OpenAIModelsTests") { runOpenAIModelsTests() }
 suite("JSONFenceStripperTests") { runJSONFenceStripperTests() }
+suite("CodeCropperTests") { runCodeCropperTests() }
 suite("ChatRequestValidatorTests") { runChatRequestValidatorTests() }
 suite("OriginValidatorTests") { runOriginValidatorTests() }
 suite("ServerSecurityTests") { runServerSecurityTests() }
@@ -124,6 +125,7 @@ suite("ChatHistoryTests") { runChatHistoryTests() }
 suite("CompletionsTests") { runCompletionsTests() }
 suite("SchemaFlagTests") { runSchemaFlagTests() }
 suite("MessagesFlagTests") { runMessagesFlagTests() }
+suite("CodeFlagTests") { runCodeFlagTests() }
 suite("PrewarmDecisionTests") { runPrewarmDecisionTests() }
 suite("ResponsesModelsTests") { runResponsesModelsTests() }
 

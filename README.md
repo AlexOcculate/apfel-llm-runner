@@ -81,6 +81,10 @@ cat report.pdf | apfel "Summarize this"
 # Combine files with piped input
 git diff HEAD~1 | apfel -f CONVENTIONS.md "Review this diff against our conventions"
 
+# Only the code - no prose, no markdown fences (pipe-safe, exit 7 if empty)
+apfel --code "a python function that deduplicates a list" > dedupe.py
+apfel --code "shell one-liner to find the 10 largest files here" | pbcopy
+
 # JSON output for scripting
 apfel -o json "Translate to German: hello" | jq .content
 
